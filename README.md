@@ -4,6 +4,13 @@ Physically simulated explosion effects for **DCS World**.
 
 **Video (stock effects vs. mod, side by side):** https://youtu.be/ScPUO9IXvjo
 
+Simulation renders of the other warheads:
+
+- Rocket / small explosion: https://youtu.be/Lwa2Qc4Zwtc
+- Medium bomb: https://youtu.be/Y25AtSTF7u8
+- Napalm: https://youtu.be/-kpGMlM3ZQs
+- Tank shell impact: https://youtu.be/gMRdXqjrats
+
 Instead of hand-drawing an explosion, BoomMod simulates it: a custom solver computes the blast wave, combustion and buoyant rise of the hot gases, and that physics is what builds the mushroom cloud. The result is converted to DCS's own particle format (`.ffx`).
 
 - Does **not** touch shaders or `Config\Effects` - passes the multiplayer integrity check
