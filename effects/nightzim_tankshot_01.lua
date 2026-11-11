@@ -1,0 +1,23 @@
+FFXPreset = 
+{
+	FXFile = [[nightzim_tankshot_01]],
+	ParticlesPerCluster = 2,
+	Lifetime = 4.000000,
+	SmokeColor = {0.686275,0.674510,0.615686},
+	GlowColor = {1.000000,0.576471,0.133333},
+	GlowColorCold = {1.000000,0.305882,0.113725},
+	GlowTemperatureMin = 0.000000,
+	GlowBrightness = 70.000000,
+	GlowAdditiveness = 1.000000,
+	ClusterRadius = 0.600000,
+	ParticleSize = 3.200000,
+	OpacityFactor = 1.000000,
+	AngularSpeedFactor = 1.000000,
+	Translucency = 0.150000,
+	DetailParams = {0.500000,0.500000,1.000000,1.000000},
+	LightDecay = 0.750000,
+	ShadowParticleOpacity = 1.000000,
+	ShadowParticleScale = 0.330000,
+	bOriented = 1,
+	ExplosionRadiusHint = 3.8,
+}

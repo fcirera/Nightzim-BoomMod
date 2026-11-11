@@ -1,0 +1,60 @@
+# Nightzim BoomMod
+
+Physically simulated explosion effects for **DCS World**.
+
+**Video (stock effects vs. mod, side by side):** https://youtu.be/ScPUO9IXvjo
+
+Instead of hand-drawing an explosion, BoomMod simulates it: a custom solver computes the blast wave, combustion and buoyant rise of the hot gases, and that physics is what builds the mushroom cloud. The result is converted to DCS's own particle format (`.ffx`).
+
+- Does **not** touch shaders or `Config\Effects` - passes the multiplayer integrity check
+- Same particle budget as the stock effects (1024 per effect)
+- Original files are backed up (with SHA-256) and can be restored at any time
+
+## What is replaced
+
+| DCS effect | BoomMod file | Used for |
+|---|---|---|
+| `airExplosion_01` | `nightzim_air_02` | air burst |
+| `groundExplosion_big` | `nightzim_jdam_01` | large bombs (2000 lb class) |
+| `groundExplosion_03_01` | `nightzim_mk82_01` | medium bombs |
+| `groundExplosion_nar` | `nightzim_nar_01` | rockets / small warheads |
+| `groundExplosion_napalm` | `nightzim_napalm_01` | napalm |
+| `T90A_shot_exp_b` | `nightzim_tankshot_01` | tank shell impact |
+
+## Install
+
+1. Close DCS.
+2. Run `installer/Nightzim_BoomMod_v3_2c.bat` and choose **1** (install) or **2** (restore originals).
+3. After a DCS update or repair, run it again.
+
+The installer menu is currently in Portuguese. Backups are kept in `Saved Games\DCS\Nightzim BoomMod\Backup`.
+
+## Known limits
+
+- Medium explosions sometimes use a stock preset defined in `Config`, which the mod cannot replace without failing the integrity check.
+- Smoke colour ageing is approximated through the glow channel, so smoke is slightly luminous at night.
+
+## What would unlock more in DCS
+
+1. Per-particle colour over lifetime (today: one `SmokeColor` per effect)
+2. More than 1024 particles per effect, with distance LOD
+3. Per-particle size
+4. Black-body colour ramp instead of a fixed temperature^4 glow
+5. User effects in Saved Games that can pass the integrity check
+6. A separate long-lived ground-dust layer
+
+## Support
+
+If you enjoy the mod, **buy me a module** - it keeps me motivated to keep improving the sim's effects. Every penny is welcome.
+
+PayPal: `fcirera2007@gmail.com`
+
+## Contact
+
+Questions and suggestions are welcome. Discord ID: `999680611314831390`
+
+## Status
+
+Version 3.2c, work in progress. This repository contains the mod files and the installer. The simulation engine and the `.ffx` exporter are not published here.
+
+Not affiliated with Eagle Dynamics. DCS World is a trademark of its owner.
