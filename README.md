@@ -30,6 +30,10 @@ Instead of hand-drawing an explosion, BoomMod simulates it: a custom solver comp
 
 **Download:** https://github.com/fcirera/Nightzim-BoomMod/releases/latest
 
+## Beta
+
+**v3.3 beta** (feedback from r/hoggit): grey-brown smoke instead of black, smaller and denser particles at the base, visible initial expansion, stronger inverted cone of earth and debris. Files in `beta/`; download from the [v3.3-beta pre-release](https://github.com/fcirera/Nightzim-BoomMod/releases/tag/v3.3-beta). Same installer, same IC-safe method. Run the v3.2c installer again to go back.
+
 ## Install
 
 1. Close DCS.
