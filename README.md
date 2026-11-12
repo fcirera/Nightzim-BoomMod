@@ -28,17 +28,19 @@ Instead of hand-drawing an explosion, BoomMod simulates it: a custom solver comp
 | `groundExplosion_napalm` | `nightzim_napalm_01` | napalm |
 | `T90A_shot_exp_b` | `nightzim_tankshot_01` | tank shell impact |
 
+**Download:** https://github.com/fcirera/Nightzim-BoomMod/releases/latest
+
 ## Install
 
 1. Close DCS.
-2. Run `installer/Nightzim_BoomMod_v3_2c.bat` and choose **1** (install) or **2** (restore originals).
+2. Download `Nightzim_BoomMod_v3.2c_installer.zip` from the [latest release](https://github.com/fcirera/Nightzim-BoomMod/releases/latest), extract the .bat, run it and choose **1** (install) or **2** (restore originals).
 3. After a DCS update or repair, run it again.
 
 The installer menu is currently in Portuguese. Backups are kept in `Saved Games\DCS\Nightzim BoomMod\Backup`.
 
 ### Option B - OVGME / mod manager
 
-Download `ovgme/Nightzim_BoomMod_v3.2c_OVGME.zip`, put it (or the extracted `Nightzim BoomMod v3.2c` folder) in your OVGME mods folder for the DCS **game root** (not Saved Games) and enable it. The mod manager keeps its own backup of the original files. After a DCS update or repair, disable and re-enable the mod.
+Download `Nightzim_BoomMod_v3.2c_OVGME.zip` from the [latest release](https://github.com/fcirera/Nightzim-BoomMod/releases/latest), put it (or the extracted `Nightzim BoomMod v3.2c` folder) in your OVGME mods folder for the DCS **game root** (not Saved Games) and enable it. The mod manager keeps its own backup of the original files. After a DCS update or repair, disable and re-enable the mod.
 
 Use either the .bat installer or the mod manager, not both.
 
