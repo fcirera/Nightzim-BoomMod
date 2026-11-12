@@ -36,6 +36,12 @@ Instead of hand-drawing an explosion, BoomMod simulates it: a custom solver comp
 
 The installer menu is currently in Portuguese. Backups are kept in `Saved Games\DCS\Nightzim BoomMod\Backup`.
 
+### Option B - OVGME / mod manager
+
+Download `ovgme/Nightzim_BoomMod_v3.2c_OVGME.zip`, put it (or the extracted `Nightzim BoomMod v3.2c` folder) in your OVGME mods folder for the DCS **game root** (not Saved Games) and enable it. The mod manager keeps its own backup of the original files. After a DCS update or repair, disable and re-enable the mod.
+
+Use either the .bat installer or the mod manager, not both.
+
 ## Known limits
 
 - Medium explosions sometimes use a stock preset defined in `Config`, which the mod cannot replace without failing the integrity check.
