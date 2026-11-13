@@ -156,7 +156,8 @@ end
 -- tipo da explosao pelo nome da arma (modo multiplayer, sem a massa do explosivo)
 local function classify_name(n)
 	n = string.upper(n or "")
-	if string.find(n, "NAPALM") or string.find(n, "BLU_27") or string.find(n, "ZB_500") or string.find(n, "INCEND") then return 4 end
+	for _, k in ipairs({"NAPALM", "MK_77", "MK-77", "MK77", "BLU_27", "BLU-27", "BLU_1B", "BLU-1B", "BLU_1/B", "BLU-1/B", "ZB_500", "ZB-500", "INCEND", "FIREBOMB", "FIRE_BOMB", "FIRE BOMB"}) do
+		if string.find(n, k, 1, true) then return 4 end end
 	for _, k in ipairs({"MK_84", "MK-84", "GBU_31", "GBU-31", "GBU_10", "GBU-10", "GBU_24", "GBU-24", "BLU_109", "FAB_500", "FAB-500", "FAB_1500", "KAB_500", "KAB_1500", "BETAB", "AGM_84", "AGM_154", "KH_29", "KH-29", "KH_25", "KH_59"}) do
 		if string.find(n, k, 1, true) then return 0 end end
 	for _, k in ipairs({"MK_82", "MK-82", "MK_83", "MK-83", "GBU_12", "GBU-12", "GBU_38", "GBU-38", "GBU_32", "GBU_54", "GBU_16", "FAB_250", "FAB_100", "OFAB", "KAB_250", "AGM_65", "AGM-65", "AGM_88", "AGM_114", "S_24", "S-24", "S_25", "AGM_62", "SNEB", "BDU"}) do
