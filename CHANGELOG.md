@@ -1,0 +1,48 @@
+# Nightzim BoomMod X - Changelog / Notas de atualização
+
+Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
+
+## Unreleased - in testing / Em teste (ainda não lançado)
+
+**English**
+- **Targeting pod:** explosions are now also drawn in the targeting pod image (MFD). The add-on finds the pod's own render pass (narrow field of view) and draws the explosion there with the pod camera. Still being validated in game.
+- **Video memory (VRAM) options in the installer** (Portuguese / English):
+  - *Variety* - how many variations of each explosion may go to the GPU: Low (1 per type), Medium (2), High (all).
+  - *Load variations only when used* - the first variation of each type loads at start; the others only the first time they are drawn at random.
+  - *Compression* - Off, Half the memory (BC5, our own encoder) or One quarter (BC7).
+  - The installer shows the estimated VRAM for the chosen settings.
+- **Variations:** the add-on now accepts extra volumes per type (`jdam_2.nzv`, `jdam_3.nzv`, ...). The extra volumes themselves are not shipped yet.
+- **Dust skirt (preview):** a separate dust layer raised by the shock wave running along the ground, on top of the existing explosions. Offline preview only, not in the mod yet.
+- **Blender:** `nightzim_boom` add-on 0.2.0 opens the mod's `.nzv` volumes as animated OpenVDB volumes.
+
+**Português**
+- **Pod de mira (targeting pod):** as explosões passam a ser desenhadas também na imagem do pod (MFD). O add-on acha a passada própria do pod (campo de visão estreito) e desenha a explosão ali com a câmera do pod. Ainda em validação no jogo.
+- **Opções de memória de vídeo (VRAM) no instalador** (português / inglês):
+  - *Variedade* - quantas variações de cada explosão podem ir para a placa: Baixa (1 por tipo), Média (2), Alta (todas).
+  - *Carregar variações só quando usadas* - a primeira de cada tipo carrega na abertura; as outras só na primeira vez que forem sorteadas.
+  - *Compressão* - Desligada, Metade da memória (BC5, codificador próprio) ou Um quarto (BC7).
+  - O instalador mostra a VRAM estimada para as opções escolhidas.
+- **Variações:** o add-on aceita volumes extras por tipo (`jdam_2.nzv`, `jdam_3.nzv`, ...). Os volumes extras ainda não acompanham o pacote.
+- **Saia de poeira (prévia):** camada separada de poeira levantada pela onda de choque rente ao chão, por cima das explosões existentes. Só em prévia offline, ainda fora do mod.
+- **Blender:** add-on `nightzim_boom` 0.2.0 abre os volumes `.nzv` do mod como volumes OpenVDB animados.
+
+## X v1.0b - 2026-11-13
+
+- Realistic colour shader (early white-yellow fireball, deep red late fire, bluish soot, lighter dust) with a Classic option.
+- New JDAM volume matched to real footage; the classic one stays selectable (installer or F10 menu).
+- Installer with activate / disable / uninstall, backups with SHA-256 check, options, Portuguese and English.
+- Tank gun muzzle blast oriented to the barrel. Stock explosions replaced by blank models (optional).
+
+*Shader de cores realistas (com opção Clássica); JDAM nova baseada em vídeo real, com a clássica selecionável; instalador com ativar / desativar / desinstalar, backup, opções, em português e inglês; tiro de tanque orientado pelo cano; explosões do jogo trocadas por modelos em branco (opcional).*
+
+## X v1.0 - 2026-11-13
+
+- First volumetric release: ReShade add-on that ray-marches simulated explosion volumes on top of the game, with scene depth, sun self-shadowing, wind drift and shock waves.
+- Triggered by real bombs, rockets, missiles and tank shells, in single player and multiplayer.
+
+*Primeira versão volumétrica: add-on do ReShade que desenha por cima do jogo os volumes simulados, com profundidade da cena, sombra do sol, deriva com o vento e ondas de choque; acionada por bombas, foguetes, mísseis e tiros de tanque reais, em single player e multiplayer.*
+
+## Acknowledgements / Agradecimentos
+
+- **Richard Geldreich, Jr.** - [bc7enc_rdo](https://github.com/richgel999/bc7enc_rdo) (MIT / public domain), the BC7 encoder used by the "One quarter" VRAM compression option. Thank you! *O compressor BC7 usado na opção "Um quarto" de compressão de VRAM. Obrigado!*
+- **crosire and the ReShade contributors** - [ReShade](https://reshade.me) and its add-on API, which the volumetric renderer is built on. *O ReShade e a API de add-ons, base do renderizador volumétrico.*
