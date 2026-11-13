@@ -1,4 +1,6 @@
-# Nightzim BoomMod
+﻿# Nightzim BoomMod
+
+> **NEW: Nightzim BoomMod X v1.0** - volumetric explosions drawn on top of the game (ReShade add-on), triggered by real bombs, rockets and missiles. How it works and what every file does: [BoomModX.md](BoomModX.md)
 
 Physically simulated explosion effects for **DCS World**.
 
