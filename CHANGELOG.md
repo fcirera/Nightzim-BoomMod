@@ -14,6 +14,7 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
   - *Load variations only when used* - the first variation of each type loads at start; the others only the first time they are drawn at random.
   - *Compression* - Off, Half the memory (BC5, our own encoder) or One quarter (BC7).
   - The installer shows the estimated VRAM for the chosen settings.
+- **Per-explosion VRAM choice:** the installer's new VRAM tab lets you pick, for each explosion type (JDAM, air burst, rocket, Mk-82, napalm, tank gun), Off or 1 to 5 variations, and adds up the video memory as you choose.
 - **Variations:** the add-on now accepts extra volumes per type (`jdam_2.nzv`, `jdam_3.nzv`, ...). The extra volumes themselves are not shipped yet.
 - **Dust skirt (preview):** a separate dust layer raised by the shock wave running along the ground, on top of the existing explosions. Offline preview only, not in the mod yet.
 - **Blender:** `nightzim_boom` add-on 0.2.0 opens the mod's `.nzv` volumes as animated OpenVDB volumes.
@@ -28,6 +29,7 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
   - *Carregar variações só quando usadas* - a primeira de cada tipo carrega na abertura; as outras só na primeira vez que forem sorteadas.
   - *Compressão* - Desligada, Metade da memória (BC5, codificador próprio) ou Um quarto (BC7).
   - O instalador mostra a VRAM estimada para as opções escolhidas.
+- **VRAM por explosão:** a nova aba VRAM do instalador deixa escolher, para cada tipo (JDAM, aérea, foguete, Mk-82, napalm, tiro de tanque), Não ou 1 a 5 variações, e vai somando a memória de vídeo conforme a escolha.
 - **Variações:** o add-on aceita volumes extras por tipo (`jdam_2.nzv`, `jdam_3.nzv`, ...). Os volumes extras ainda não acompanham o pacote.
 - **Saia de poeira (prévia):** camada separada de poeira levantada pela onda de choque rente ao chão, por cima das explosões existentes. Só em prévia offline, ainda fora do mod.
 - **Blender:** add-on `nightzim_boom` 0.2.0 abre os volumes `.nzv` do mod como volumes OpenVDB animados.

@@ -51,6 +51,7 @@ struct Config
 	float detail = 0.8f, detail_scale = 12.f, fire_gain = 0.6f, flame_min_t = 1450.f, edge_fade = 0.08f;
 	float fog_dist = 15000.f, fog_r = 0.62f, fog_g = 0.68f, fog_b = 0.76f, hold_s = 24.f, fade_end = 40.f, freeze_t = -1.f;
 	float night_ambient = 0.02f, night_fire = 1.5f, night_glow = 2.0f;	// noite: luz ambiente minima, ganho do fogo e da luz do fogo na fumaca
+	int vram_n[7] = {-1, -1, -1, -1, -1, -1, -1};	// variacoes por tipo escolhidas no instalador (0 = tipo desligado; -1 = usar vram_var)
 	int vram_var = 2, vram_lazy = 1, vram_bc = 0;	// variacoes por tipo na VRAM, carregar so quando usar, comprimir (0 nao, 1 = metade/BC5, 2 = um quarto/BC7)
 	int pod_on = 1, pod_min_draws = 40, pod_log = 1; float pod_max_fov = 12.f;	// pod: campo estreito (NFOV ~1,3 graus, WFOV ~4,5)
 	int reversed = 1, max_steps = 420, flip_right = 0, debug = 0, auto_calib = 1, depth_min_draws = 20;
@@ -100,6 +101,8 @@ static void load_config()
 	{
 		char b2[16]; GetPrivateProfileStringA("vram", "variedade", "media", b2, sizeof b2, (g_dir + "NightzimBoom.ini").c_str());
 		c.vram_var = !_stricmp(b2, "alta") ? 5 : !_stricmp(b2, "media") ? 2 : (atoi(b2) > 0 ? std::min(5, atoi(b2)) : 1);
+		{ const char *k[6] = {"n_jdam", "n_aerea", "n_pequena", "n_media", "n_napalm", "n_tanque"}; for (int i = 0; i < 6; i++) c.vram_n[i] = std::max(-1, std::min(5, (int)ini_f("vram", k[i], -1.f))); }
+		c.vram_n[6] = c.vram_n[0] == 0 ? 0 : 1;	// JDAM classica: acompanha a JDAM, sempre uma so
 		c.vram_lazy = (int)ini_f("vram", "sob_demanda", (float)c.vram_lazy); c.vram_bc = (int)ini_f("vram", "comprimir", (float)c.vram_bc);
 	}
 	c.night_ambient = ini_f("night", "ambient", c.night_ambient); c.night_fire = ini_f("night", "fire_boost", c.night_fire); c.night_glow = ini_f("night", "glow_boost", c.night_glow);
@@ -286,15 +289,15 @@ static DWORD WINAPI loader_thread(LPVOID p)
 	// quais variacoes existem (limitadas pela opcao "variedade" do instalador)
 	for (int k = 0; k < NTYPES; k++)
 	{
-		int n = 0;
-		for (int v = 0; v < MAXV && n < cfg.vram_var; v++) { DWORD a = GetFileAttributesA((g_dir + vol_file(k, v)).c_str()); if (a == INVALID_FILE_ATTRIBUTES) break; vols[k * MAXV + v].exists = true; n++; }
+		int n = 0, lim = cfg.vram_n[k] >= 0 ? cfg.vram_n[k] : cfg.vram_var;
+		for (int v = 0; v < MAXV && n < lim; v++) { DWORD a = GetFileAttributesA((g_dir + vol_file(k, v)).c_str()); if (a == INVALID_FILE_ATTRIBUTES) break; vols[k * MAXV + v].exists = true; n++; }
 		g_nvar[k] = n;
 	}
 	// a primeira de cada tipo sempre carrega na abertura; as outras agora ou so quando forem sorteadas
-	for (int k = 0; k < NTYPES; k++) load_volume(dev, k, 0);
+	for (int k = 0; k < NTYPES; k++) if (g_nvar[k] > 0) load_volume(dev, k, 0); else if (cfg.vram_n[k] == 0) logf("explosao %s desligada no instalador (nao carregada)", TYPE_NAME[k]);
 	if (!cfg.vram_lazy)
 		for (int k = 0; k < NTYPES; k++) for (int v = 1; v < g_nvar[k]; v++) load_volume(dev, k, v);
-	logf("variacoes por tipo: ate %d, %s, %s", cfg.vram_var, cfg.vram_lazy ? "extras carregam quando sorteadas" : "todas na abertura", cfg.vram_bc == 2 ? "comprimidas a 1/4 (BC7)" : cfg.vram_bc ? "comprimidas a 1/2 (BC5)" : "sem compressao");
+	logf("variacoes por tipo: jdam %d, aerea %d, pequena %d, media %d, napalm %d, tanque %d (padrao %d); %s, %s", g_nvar[0], g_nvar[1], g_nvar[2], g_nvar[3], g_nvar[4], g_nvar[5], cfg.vram_var, cfg.vram_lazy ? "extras carregam quando sorteadas" : "todas na abertura", cfg.vram_bc == 2 ? "comprimidas a 1/4 (BC7)" : cfg.vram_bc ? "comprimidas a 1/2 (BC5)" : "sem compressao");
 	dev->Release();
 	return 0;
 }
@@ -830,6 +833,7 @@ static void poll_shared()
 	for (; g_spawn_seq_seen < seq; g_spawn_seq_seen++)
 	{
 		auto &e = g_sh->ring[g_spawn_seq_seen % NZ_RING];
+		if (e.type >= 0 && e.type < 6 && cfg.vram_n[e.type] == 0) continue;	// tipo desligado pelo usuario: sem explosao
 		int ty = (e.type >= 0 && e.type < 6 && vols[e.type * MAXV].ready) ? e.type : 0;
 		bool v1 = g_sh->opt_jdam == 2 || (g_sh->opt_jdam != 1 && cfg.jdam_v1);
 		if (ty == 0 && v1 && vols[6 * MAXV].ready) ty = 6;

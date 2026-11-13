@@ -35,8 +35,10 @@ enum { W_BTN, W_TOG, W_SEG, W_TAB };
 struct Wd { int type = 0, page = 0, id = 0, value = 0, style = 0; Gdiplus::RectF r; std::wstring text; std::vector<std::wstring> opts; };
 static std::vector<Wd> g_w;
 static int g_cJdam, g_cCor, g_cQual, g_cDet, g_kShock, g_kWilson, g_kWind, g_kStock, g_cVar, g_kLazy, g_kBC;	// indices em g_w
+static int g_cN[6];	// variacoes por tipo de explosao (0 = desligada)
+static const wchar_t *N_FILE[6] = {L"jdam", L"aerea", L"nar", L"mk82", L"napalm", L"tank"}, *N_KEY[6] = {L"n_jdam", L"n_aerea", L"n_pequena", L"n_media", L"n_napalm", L"n_tanque"};
 static int g_page = 0, g_state = 0, g_hover_part = 0;	// g_state: -1 sem DCS, 0 nao instalado, 1 ativo, 2 desativado
-static std::wstring g_vram; static std::vector<std::wstring> g_lines; static bool g_wnd_title_dirty = false;
+static std::wstring g_vram, g_vram_big, g_vram_note; static std::vector<std::wstring> g_lines; static bool g_wnd_title_dirty = false;
 static fs::path g_exe_dir, g_payload, g_sg, g_root;	// g_root = Saved Games\DCS\Nightzim BoomMod X
 
 static bool g_pt = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_PORTUGUESE;	// Windows em portugues -> PT, senao EN
@@ -219,24 +221,39 @@ static bool want_stock_replace() { return chk(g_kStock); }
 static void update_vram_label()
 {
 	if (g_w.empty()) return;
-	static const wchar_t *tipos[] = {L"jdam", L"aerea", L"nar", L"mk82", L"napalm", L"tank", L"jdam_v1"};
+	static const wchar_t *nome_pt[6] = {L"JDAM (2000 lb)", L"Explosão aérea", L"Foguete", L"Mk-82 (média)", L"Napalm", L"Tiro de tanque"};
+	static const wchar_t *nome_en[6] = {L"JDAM (2000 lb)", L"Air burst", L"Rocket", L"Mk-82 (medium)", L"Napalm", L"Tank gun"};
 	fs::path dir = g_payload / L"bin" / L"NightzimBoom"; std::error_code ec;
 	if (!fs::exists(dir / L"jdam.nzv", ec)) dir = dcs_path() / L"bin" / L"NightzimBoom";
-	int nmax = sel(g_cVar) == 0 ? 1 : sel(g_cVar) == 1 ? 2 : 5;
-	double ini = 0, tot = 0; int nv = 0;
-	for (auto t : tipos)
-		for (int v = 0; v < 5 && v < nmax; v++)
-		{
-			fs::path p = dir / (std::wstring(t) + (v ? L"_" + std::to_wstring(v + 1) : L"") + L".nzv");
-			if (!fs::exists(p, ec)) break;
-			double mb = (double)fs::file_size(p, ec) / 1048576.0;
-			tot += mb; nv++; if (v == 0) ini += mb;
-		}
 	double k = sel(g_kBC) == 2 ? 0.25 : sel(g_kBC) == 1 ? 0.5 : 1.0;
+	double ini = 0, tot = 0; int nv = 0; bool falta = false, algum_off = false;
+	auto mb = [&](const std::wstring &f) { fs::path p = dir / f; return fs::exists(p, ec) ? (double)fs::file_size(p, ec) / 1048576.0 : -1.0; };
+	for (int i = 0; i < 6; i++)
+	{
+		int n = sel(g_cN[i]); double row = 0, um = mb(std::wstring(N_FILE[i]) + L".nzv");
+		for (int v = 0; v < n; v++)
+		{
+			double m = mb(std::wstring(N_FILE[i]) + (v ? L"_" + std::to_wstring(v + 1) : L"") + L".nzv");
+			if (m < 0) { falta = true; break; }
+			row += m; nv++; if (v == 0) ini += m;
+		}
+		if (i == 0 && n > 0) { double m = mb(L"jdam_v1.nzv"); if (m > 0) { row += m; ini += m; nv++; } }	// JDAM classica acompanha a JDAM
+		if (n == 0) algum_off = true;
+		tot += row;
+		wchar_t b[128];
+		if (n == 0) swprintf(b, 128, L"%ls", (g_pt ? nome_pt : nome_en)[i]);
+		else swprintf(b, 128, L"%ls  ·  %.0f MB", (g_pt ? nome_pt : nome_en)[i], row * k);
+		g_w[g_cN[i]].text = b; (void)um;
+	}
 	wchar_t b[256];
-	if (chk(g_kLazy)) swprintf(b, 256, T(L"VRAM do mod: %.1f GB na abertura, até %.1f GB se todas forem usadas (%d arquivos)", L"Mod VRAM: %.1f GB at start, up to %.1f GB if all get used (%d files)"), ini * k / 1024, tot * k / 1024, nv);
-	else swprintf(b, 256, T(L"VRAM do mod: %.1f GB (%d arquivos, todos carregados na abertura)", L"Mod VRAM: %.1f GB (%d files, all loaded at start)"), tot * k / 1024, nv);
-	g_vram = b; if (g_wnd) InvalidateRect(g_wnd, nullptr, FALSE);
+	bool lazy = chk(g_kLazy);
+	swprintf(b, 256, L"%.2f GB", (lazy ? ini : tot) * k / 1024); g_vram_big = b;
+	if (lazy && tot > ini + 1) swprintf(b, 256, T(L"na abertura do jogo; até %.2f GB se todas as variações forem usadas (%d arquivos)", L"at game start; up to %.2f GB if every variation gets used (%d files)"), tot * k / 1024, nv);
+	else swprintf(b, 256, T(L"somando as explosões escolhidas (%d arquivos)", L"adding up the chosen explosions (%d files)"), nv);
+	g_vram = b;
+	g_vram_note = std::wstring(falta ? T(L"Algumas variações escolhidas ainda não acompanham o pacote: valem as que existirem. ", L"Some chosen variations are not in the package yet: the ones that exist are used. ") : L"") +
+		(algum_off ? T(L"\"Não\": esse tipo não é carregado e a explosão dele não aparece.", L"\"Off\": that type is not loaded and its explosion is not shown.") : L"");
+	if (g_wnd) InvalidateRect(g_wnd, nullptr, FALSE);
 }
 
 static void load_options()
@@ -252,8 +269,10 @@ static void load_options()
 	setchk(g_kWilson, _wtof(f(L"shock", L"wilson", L"1").c_str()) > 0);
 	setchk(g_kWind, _wtoi(f(L"wind", L"enabled", L"1").c_str()) != 0);
 	setchk(g_kStock, _wtoi(f(L"instalador", L"substituir", L"1").c_str()) != 0);
-	std::wstring va = f(L"vram", L"variedade", L"media");
-	setsel(g_cVar, va == L"baixa" ? 0 : va == L"alta" ? 2 : 1);
+	{
+		std::wstring va = f(L"vram", L"variedade", L"baixa"); int def = va == L"alta" ? 5 : va == L"media" ? 2 : 1;
+		for (int i = 0; i < 6; i++) { int n = _wtoi(f(L"vram", N_KEY[i], std::to_wstring(def).c_str()).c_str()); setsel(g_cN[i], n < 0 ? 0 : n > 5 ? 5 : n); }
+	}
 	setchk(g_kLazy, _wtoi(f(L"vram", L"sob_demanda", L"1").c_str()) != 0);
 	{ int c = _wtoi(f(L"vram", L"comprimir", L"0").c_str()); setsel(g_kBC, c < 0 || c > 2 ? 0 : c); }
 	update_vram_label();
@@ -285,8 +304,7 @@ static void apply_options()
 	ini_set(L"shock", L"wilson", chk(g_kWilson) ? L"1.0" : L"0");
 	ini_set(L"wind", L"enabled", chk(g_kWind) ? L"1" : L"0");
 	{
-		const wchar_t *va[3] = {L"baixa", L"media", L"alta"};
-		ini_set(L"vram", L"variedade", va[sel(g_cVar) < 0 ? 1 : sel(g_cVar)]);
+		for (int i = 0; i < 6; i++) ini_set(L"vram", N_KEY[i], std::to_wstring(sel(g_cN[i])));
 		ini_set(L"vram", L"sob_demanda", chk(g_kLazy) ? L"1" : L"0");
 		ini_set(L"vram", L"comprimir", std::to_wstring(sel(g_kBC) < 0 ? 0 : sel(g_kBC)));
 	}
@@ -417,7 +435,7 @@ static void refresh_status()
 }
 
 // ---------------------------------------------------------------- janela (interface propria, desenhada com GDI+)
-enum { ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH };
+enum { ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH };
 static bool g_pix = false; static Gdiplus::Bitmap *g_qr = nullptr, *g_icDisc = nullptr, *g_icInsta = nullptr, *g_icPix = nullptr;	// icones fornecidos pelo autor
 static const wchar_t *PIX_KEY = L"f5124246-e867-42ce-a16b-d139017560a5";
 static const wchar_t *PAY_EMAIL = L"fcirera2007@gmail.com";
@@ -510,20 +528,24 @@ static void build_ui()
 	g_kWilson = add(W_TOG, 1, 0, X0 + W / 2 + 8, y, W / 2 - 8, 30, T(L"Nuvem de Wilson", L"Wilson cloud")); y += 34;
 	g_kWind = add(W_TOG, 1, 0, X0, y, W / 2 - 8, 30, T(L"Fumaça deriva com o vento", L"Smoke drifts with the wind"));
 	g_kStock = add(W_TOG, 1, 0, X0 + W / 2 + 8, y, W / 2 - 8, 30, T(L"Substituir explosões do jogo", L"Replace stock explosions")); y += 70;
-	g_cVar = add(W_SEG, 1, ID_VRAM, X0, y, W, 34, T(L"Variedade", L"Variety"), {T(L"Baixa (1)", L"Low (1)"), T(L"Média (2)", L"Medium (2)"), T(L"Alta (todas)", L"High (all)")}); y += 40;
-	g_kBC = add(W_SEG, 1, ID_VRAM, X0, y, W, 34, T(L"Compressão", L"Compression"), {T(L"Desligada", L"Off"), T(L"Metade", L"Half"), T(L"Um quarto (BC7)", L"One quarter (BC7)")}); y += 44;
-	g_kLazy = add(W_TOG, 1, ID_VRAM, X0, y, W, 30, T(L"Carregar variações só quando usadas", L"Load variations only when used"));
+	g_cVar = add(W_SEG, 9, ID_VRAM, X0, y, W, 34, L"", {L"", L"", L""});	// (antigo seletor global; fora de uso)
+	g_kBC = add(W_SEG, 3, ID_VRAM, X0, 346, W, 34, T(L"Compressão", L"Compression"), {T(L"Desligada", L"Off"), T(L"Metade", L"Half"), T(L"Um quarto (BC7)", L"One quarter (BC7)")});
+	g_kLazy = add(W_TOG, 3, ID_VRAM, X0, 390, W, 30, T(L"Carregar variações extras só quando usadas", L"Load extra variations only when used"));
+	for (int i = 0; i < 6; i++) g_cN[i] = add(W_SEG, 3, ID_VRAM, X0, 104.f + 38 * i, W, 32, L"", {T(L"Não", L"Off"), L"1", L"2", L"3", L"4", L"5"});
 	(void)LBL;
 	if (had) for (int i = 0; i < keep_n && i < (int)g_w.size(); i++) g_w[i].value = keep_sel[i];
+	else for (int i = 0; i < 6; i++) g_w[g_cN[i]].value = 1;
 	add(W_BTN, 1, ID_APPLY, X1 - 200, CH - 62, 200, 42, T(L"APLICAR OPÇÕES", L"APPLY OPTIONS"), {}, 1);
+	add(W_BTN, 3, ID_APPLY, X1 - 200, CH - 62, 200, 42, T(L"APLICAR OPÇÕES", L"APPLY OPTIONS"), {}, 1);
 	// --- abas e idioma (todas as paginas)
 	add(W_TAB, -1, ID_TAB0, X0, 22, 0, 40, T(L"INSTALAÇÃO", L"INSTALL"));
 	add(W_TAB, -1, ID_TAB1, 0, 22, 0, 40, T(L"OPÇÕES", L"OPTIONS"));
+	add(W_TAB, -1, ID_TAB3, 0, 22, 0, 40, L"VRAM");
 	add(W_TAB, -1, ID_TAB2, 0, 22, 0, 40, T(L"REGISTRO", L"LOG"));
 	add(W_BTN, -1, ID_PAY, 30, CH - 100.f, 200, 46, T(L"Apoie  ·  PayPal", L"Support me  ·  PayPal"), {}, 4);
 	add(W_BTN, -1, ID_PIX, 238, CH - 100.f, 132, 46, L"Pix", {}, 6);
-	add(W_BTN, -1, ID_DISC, X1 - 52 - 10 - 46 - 10 - 80 - 10 - 68, 28, 68, 28, L"Discord", {}, 5);
-	add(W_BTN, -1, ID_INSTA, X1 - 52 - 10 - 46 - 10 - 80, 28, 80, 28, L"Instagram", {}, 5);
+	add(W_BTN, -1, ID_DISC, X1 - 52 - 10 - 46 - 8 - 22 - 8 - 22, 28, 22, 28, L"", {}, 5);
+	add(W_BTN, -1, ID_INSTA, X1 - 52 - 10 - 46 - 8 - 22, 28, 22, 28, L"", {}, 5);
 	add(W_BTN, -1, ID_GH, X1 - 52 - 10 - 46, 28, 46, 28, L"GitHub", {}, 5);
 	add(W_BTN, -1, ID_LANG, X1 - 52, 28, 52, 28, g_pt ? L"PT | en" : L"pt | EN", {}, 3);
 	// --- instalacao
@@ -614,9 +636,16 @@ static void render(Bitmap &back)
 	if (g_page == 1)
 	{
 		spaced(g, T(L"EXPLOSÕES", L"EXPLOSIONS"), (float)X0, 80, 11.5f, C_MUT, 1.4f);
-		spaced(g, T(L"MEMÓRIA DE VÍDEO (VRAM)", L"VIDEO MEMORY (VRAM)"), (float)X0, 348, 11.5f, C_MUT, 1.4f);
-		text(g, g_vram, RectF((REAL)X0, 494, W, 22), 13, C_ACC2);
-		text(g, T(L"Um quarto: comprime ~20 s em segundo plano ao abrir o jogo.", L"One quarter: compresses ~20 s in the background at game start."), RectF((REAL)X0, 516, W, 20), 12, C_MUT);
+		text(g, T(L"Valem na próxima vez que abrir o DCS.", L"They take effect next time you start DCS."), RectF((REAL)X0, CH - 62.f, W - 220, 42), 12.5f, C_MUT);
+	}
+	if (g_page == 3)
+	{
+		spaced(g, T(L"EXPLOSÕES E VARIAÇÕES NA MEMÓRIA DE VÍDEO", L"EXPLOSIONS AND VARIATIONS IN VIDEO MEMORY"), (float)X0, 80, 11.5f, C_MUT, 1.4f);
+		fill_rr(g, RectF((REAL)X0, 432, W, 62), 12, C_CARD);
+		text(g, T(L"VRAM DO MOD", L"MOD VRAM"), RectF(X0 + 18.f, 440, 160, 18), 11.5f, C_MUT, 0, FontStyleBold);
+		text(g, g_vram_big, RectF(X0 + 18.f, 458, 200, 30), 24, C_ACC2, 0, FontStyleBold);
+		text(g, g_vram, RectF(X0 + 200.f, 440, W - 216, 48), 12.5f, C_TXT, 0, FontStyleRegular, L"Segoe UI", true);
+		text(g, g_vram_note, RectF((REAL)X0, 502, W, 36), 12, C_MUT, 0, FontStyleRegular, L"Segoe UI", true);
 		text(g, T(L"Valem na próxima vez que abrir o DCS.", L"They take effect next time you start DCS."), RectF((REAL)X0, CH - 62.f, W - 220, 42), 12.5f, C_MUT);
 	}
 	// ---- controles
@@ -641,7 +670,7 @@ static void render(Bitmap &back)
 			else if (d.style == 5)
 			{
 				Bitmap *ic = d.id == ID_DISC ? g_icDisc : d.id == ID_INSTA ? g_icInsta : nullptr; RectF tr = d.r;
-				if (ic) { g.DrawImage(ic, RectF(d.r.X + 1, d.r.Y + 6, 16, 16)); tr.X += 20; tr.Width -= 20; }
+				if (ic) { g.DrawImage(ic, RectF(d.r.X + 1, d.r.Y + 4, 20, 20)); tr.X += 22; tr.Width -= 22; }
 				text(g, d.text, tr, 12, hov ? C_ACC2 : Color(255, 170, 177, 187), ic ? 0 : 1, FontStyleRegular); if (hov) { Pen u(C_ACC2, 1); g.DrawLine(&u, tr.X + 2, d.r.Y + 23, d.r.X + d.r.Width - 2, d.r.Y + 23); }
 			}
 			else if (d.style == 6)	// Pix: abre o QR Code
@@ -694,8 +723,8 @@ static void render(Bitmap &back)
 		}
 	}
 	// ---- rodape
-	if (g_page != 1) text(g, T(L"Requer ReShade 6.x \"with full add-on support\"", L"Requires ReShade 6.x \"with full add-on support\""), RectF((REAL)X0, CH - 36.f, 380, 22), 11.5f, Color(255, 104, 111, 121));
-	if (g_page != 1) text(g, L"github.com/fcirera/Nightzim-BoomMod", RectF(X1 - 300.f, CH - 36.f, 300, 22), 11.5f, Color(255, 104, 111, 121), 2);
+	if (g_page != 1 && g_page != 3) text(g, T(L"Requer ReShade 6.x \"with full add-on support\"", L"Requires ReShade 6.x \"with full add-on support\""), RectF((REAL)X0, CH - 36.f, 380, 22), 11.5f, Color(255, 104, 111, 121));
+	if (g_page != 1 && g_page != 3) text(g, L"github.com/fcirera/Nightzim-BoomMod", RectF(X1 - 300.f, CH - 36.f, 300, 22), 11.5f, Color(255, 104, 111, 121), 2);
 	if (g_pix)
 	{
 		SolidBrush dim(Color(225, 10, 11, 13)); g.FillRectangle(&dim, RectF((REAL)HERO, 0, (REAL)(CW - HERO), (REAL)CH));
@@ -723,12 +752,12 @@ static void save_shots(const std::wstring &prefix)
 {
 	CLSID png; CLSIDFromString(L"{557CF406-1A04-11D3-9A73-0000F81EF32E}", &png);
 	g_shot = true;
-	for (int p = 0; p < 3; p++)
+	for (int p = 0; p < 4; p++)
 	{
 		g_page = p; Bitmap b((INT)(CW * g_s), (INT)(CH * g_s), PixelFormat32bppPARGB); render(b);
 		b.Save((prefix + std::to_wstring(p) + (g_pt ? L"_pt.png" : L"_en.png")).c_str(), &png, nullptr);
 	}
-	{ g_page = 0; g_pix = true; Bitmap b((INT)(CW * g_s), (INT)(CH * g_s), PixelFormat32bppPARGB); render(b); b.Save((prefix + L"3" + (g_pt ? L"_pt.png" : L"_en.png")).c_str(), &png, nullptr); }
+	{ g_page = 0; g_pix = true; Bitmap b((INT)(CW * g_s), (INT)(CH * g_s), PixelFormat32bppPARGB); render(b); b.Save((prefix + L"4" + (g_pt ? L"_pt.png" : L"_en.png")).c_str(), &png, nullptr); }
 }
 
 static int hit(float x, float y, int *part = nullptr)
@@ -752,7 +781,7 @@ static void command(int id)
 	HWND h = g_wnd;
 	switch (id)
 	{
-	case ID_TAB0: case ID_TAB1: case ID_TAB2: g_page = id - ID_TAB0; layout_children(); break;
+	case ID_TAB0: case ID_TAB1: case ID_TAB2: case ID_TAB3: g_page = id - ID_TAB0; layout_children(); break;
 	case ID_PAY:
 		if (OpenClipboard(g_wnd))
 		{
