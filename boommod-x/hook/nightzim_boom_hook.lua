@@ -301,7 +301,9 @@ local function ballistic_step(t)
 				tostring(e.name), e.p.y - ground(e.p.x, e.p.z), math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z), gap, tostring(hit)))
 			if y - hg < 60 or sp > 150 then
 				local wx, wz = wind_at(x, y, z)
-				nz.spawn(x, y, z, t, ty, 1, wx, wz)
+				-- napalm: a faixa de fogo segue a direcao em que a bomba vinha e acende da ponta do impacto para a frente
+				if ty == 4 and (v.x * v.x + v.z * v.z) > 25 then nz.spawn(x, y, z, t, ty, 1, wx, wz, math.atan2(v.z, v.x))
+				else nz.spawn(x, y, z, t, ty, 1, wx, wz) end
 				sun_update(x, z, t)
 				L(string.format("impacto (export) %s tipo %d em x=%.1f y=%.1f z=%.1f", tostring(e.name), ty, x, y, z))
 			end
@@ -345,7 +347,7 @@ function cb.onSimulationFrame()
 				pcall(nz.ack)	-- descarta o pedido
 			else
 			local wx, wz = wind_at(x, y, z)
-			if typ == 5 then nz.spawn(x, y, z, t, typ, 0, wx, wz, math.atan2(fz, fx))	-- tanque: atirando para longe da camera
+			if typ == 5 or typ == 4 then nz.spawn(x, y, z, t, typ, 0, wx, wz, math.atan2(fz, fx))	-- tanque e napalm: para longe da camera
 			else nz.spawn(x, y, z, t, typ, 0, wx, wz) end
 			-- som original do DCS: uma explosao "de verdade" do jogo no mesmo ponto (o visual dela esta em branco).
 			-- So no ambiente de script da missao (single player / missao propria). Potencia em kg de TNT por tipo.
