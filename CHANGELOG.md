@@ -5,7 +5,9 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 ## Unreleased - in testing / Em teste (ainda não lançado)
 
 **English**
-- **Targeting pod:** explosions are now also drawn in the targeting pod image (MFD). The add-on finds the pod's own render pass (narrow field of view) and draws the explosion there with the pod camera. Still being validated in game.
+- **Targeting pod:** explosions are now also drawn in the targeting pod image (MFD). The add-on finds the pod's own render pass (narrow field of view) and draws the explosion there with the pod camera. Confirmed working in game (F-16C).
+- **Night lighting:** with the sun below the horizon the smoke no longer receives daytime sky and ground light (it was showing up light grey at night), distance haze goes dark, and fire and fire-lit smoke get brighter, as seen by a dark-adapted eye. In testing.
+- **New installer look:** dark custom interface with in-game screenshots, Install / Options / Log tabs, PT/EN switch and a support (PayPal) card.
 - **Video memory (VRAM) options in the installer** (Portuguese / English):
   - *Variety* - how many variations of each explosion may go to the GPU: Low (1 per type), Medium (2), High (all).
   - *Load variations only when used* - the first variation of each type loads at start; the others only the first time they are drawn at random.
@@ -16,7 +18,9 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 - **Blender:** `nightzim_boom` add-on 0.2.0 opens the mod's `.nzv` volumes as animated OpenVDB volumes.
 
 **Português**
-- **Pod de mira (targeting pod):** as explosões passam a ser desenhadas também na imagem do pod (MFD). O add-on acha a passada própria do pod (campo de visão estreito) e desenha a explosão ali com a câmera do pod. Ainda em validação no jogo.
+- **Pod de mira (targeting pod):** as explosões passam a ser desenhadas também na imagem do pod (MFD). O add-on acha a passada própria do pod (campo de visão estreito) e desenha a explosão ali com a câmera do pod. Confirmado no jogo (F-16C).
+- **Iluminação noturna:** com o sol abaixo do horizonte a fumaça deixa de receber a luz diurna do céu e do chão (ela aparecia cinza-clara à noite), a névoa de distância escurece, e o fogo e a fumaça iluminada por ele ficam mais fortes, como para um olho adaptado ao escuro. Em teste.
+- **Instalador com visual novo:** interface escura própria com capturas do jogo, abas Instalação / Opções / Registro, troca PT/EN e cartão de apoio (PayPal).
 - **Opções de memória de vídeo (VRAM) no instalador** (português / inglês):
   - *Variedade* - quantas variações de cada explosão podem ir para a placa: Baixa (1 por tipo), Média (2), Alta (todas).
   - *Carregar variações só quando usadas* - a primeira de cada tipo carrega na abertura; as outras só na primeira vez que forem sorteadas.
