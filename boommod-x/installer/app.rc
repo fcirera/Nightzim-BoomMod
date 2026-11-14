@@ -18,8 +18,8 @@ BEGIN
       VALUE "CompanyName", "Nightzim"
       VALUE "FileDescription", "Nightzim BoomMod X - instalador"
       VALUE "ProductName", "Nightzim BoomMod X"
-      VALUE "ProductVersion", "1.2"
-      VALUE "FileVersion", "1.2"
+      VALUE "ProductVersion", "1.2.1"
+      VALUE "FileVersion", "1.2.1"
     END
   END
   BLOCK "VarFileInfo"
