@@ -53,6 +53,7 @@ struct Config
 	float night_ambient = 0.02f, night_fire = 1.5f, night_glow = 2.0f;	// noite: luz ambiente minima, ganho do fogo e da luz do fogo na fumaca
 	int vram_n[7] = {-1, -1, -1, -1, -1, -1, -1};	// variacoes por tipo escolhidas no instalador (0 = tipo desligado; -1 = usar vram_var)
 	int vram_var = 2, vram_lazy = 1, vram_bc = 0;	// variacoes por tipo na VRAM, carregar so quando usar, comprimir (0 nao, 1 = metade/BC5, 2 = um quarto/BC7)
+	int vr_on = 1, vr_swap = 0, vr_log = 1; float vr_steps = 0.6f, vr_step_scale = 1.5f;	// VR: desenhar em cada olho; qualidade reduzida
 	int pod_on = 1, pod_min_draws = 40, pod_log = 1; float pod_max_fov = 12.f;	// pod: campo estreito (NFOV ~1,3 graus, WFOV ~4,5)
 	int reversed = 1, max_steps = 420, flip_right = 0, debug = 0, auto_calib = 1, depth_min_draws = 20;
 	std::string nzv = "jdam.nzv";
@@ -106,6 +107,8 @@ static void load_config()
 		c.vram_lazy = (int)ini_f("vram", "sob_demanda", (float)c.vram_lazy); c.vram_bc = (int)ini_f("vram", "comprimir", (float)c.vram_bc);
 	}
 	c.night_ambient = ini_f("night", "ambient", c.night_ambient); c.night_fire = ini_f("night", "fire_boost", c.night_fire); c.night_glow = ini_f("night", "glow_boost", c.night_glow);
+	c.vr_on = (int)ini_f("vr", "enabled", (float)c.vr_on); c.vr_swap = (int)ini_f("vr", "swap_eyes", (float)c.vr_swap); c.vr_log = (int)ini_f("vr", "log", (float)c.vr_log);
+	c.vr_steps = ini_f("vr", "max_steps_scale", c.vr_steps); c.vr_step_scale = ini_f("vr", "step_scale", c.vr_step_scale);
 	c.pod_on = (int)ini_f("pod", "enabled", (float)c.pod_on); c.pod_min_draws = (int)ini_f("pod", "min_draws", (float)c.pod_min_draws);
 	c.pod_max_fov = ini_f("pod", "max_fov_deg", c.pod_max_fov); c.pod_log = (int)ini_f("pod", "log", (float)c.pod_log);
 	c.hold_s = ini_f("explosion", "hold_s", c.hold_s);
@@ -392,7 +395,11 @@ static bool build_shaders()
 // camera de uma vista do DCS (cabine, pod de mira, espelho...): tangente do meio fov vertical, plano proximo, aspecto, eixos
 struct ViewCap { float tanv = 0, nearv = 0, asp = 0; float ax[3][3] = {}; bool p = false, v = false; };
 static ViewCap g_any;	// ultima camera escrita pelo DCS (preenchida em matcap.inc)
-struct DStat { uint32_t draws = 0, since_clear = 0, clears = 0; ViewCap cam; bool vp_ok = false; D3D11_VIEWPORT vp = {}; bool has_rt = false; UINT rw = 0, rh = 0; int rfmt = 0; };
+// camera geral (qualquer projecao): raio do pixel = A + ndc.x * B + ndc.y * C, ja nos eixos do mundo DCS
+struct VP3 { float A[3] = {}, B[3] = {}, C[3] = {}, nearv = 0; bool ok = false; uint32_t serial = 0; };
+static VP3 g_any3;
+static inline float vlen3(const float *a) { return sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); }
+struct DStat { uint32_t draws = 0, since_clear = 0, clears = 0; ViewCap cam; VP3 cam3; bool vp_ok = false; D3D11_VIEWPORT vp = {}; bool has_rt = false; UINT rw = 0, rh = 0; int rfmt = 0; };
 static bool g_dump = false;
 static std::mutex g_mx;
 static std::unordered_map<ID3D11Resource *, DStat> g_dstat;
@@ -415,6 +422,17 @@ struct DepthCopy
 	UINT w = 0, h = 0, samples = 0; DXGI_FORMAT fmt = DXGI_FORMAT_UNKNOWN; bool valid = false;
 	void release() { SR(srv); SR(tex); valid = false; w = h = 0; }
 } g_dc, g_dc2, g_dcp;	// g_dcp: profundidade do pod de mira	// g_dc2: camada da cabine (ultimo trecho desenhado depois da limpeza)
+// VR: cada olho e uma passada propria (profundidade do tamanho do olho, centenas de desenhos, projecao descentrada).
+// Guardamos a profundidade da cena de cada olho (copiada antes da limpeza que antecede a cabine) e desenhamos a explosao
+// na imagem final de cada olho (alvo RGBA8 do tamanho do olho), antes de ela ir para o oculos.
+struct Eye { ID3D11Resource *dsv = nullptr; DepthCopy scene, cock; VP3 cam; uint64_t seen = 0; int order = -1; bool have_scene = false; uint32_t copied = 0; UINT w = 0, h = 0; };
+static Eye g_eye[2];
+static ID3D11Resource *g_final_dsv[2] = {};	// passadas finais (uma por olho), escolhidas no fim do quadro anterior
+static bool g_final_done[2] = {};
+static int g_eye_order_n = 0, g_final_n = 0;
+static bool g_vr = false;
+static Eye *eye_of(ID3D11Resource *r) { if (!r) return nullptr; for (auto &e : g_eye) if (e.dsv == r) return &e; return nullptr; }
+static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *rtv, int idx);
 static bool g_dc2_frame = false;
 
 static DXGI_FORMAT typeless_of(DXGI_FORMAT f, DXGI_FORMAT &srv)
@@ -476,7 +494,7 @@ static void on_bind_rt_ds(command_list *cmd, uint32_t count, const resource_view
 	if (!G.ok) return;
 	ID3D11Resource *r = res_of_view(dsv);
 	ID3D11RenderTargetView *rv = count > 0 && rtvs ? (ID3D11RenderTargetView *)rtvs[0].handle : nullptr;
-	ID3D11Resource *prev = nullptr; ID3D11RenderTargetView *prev_rtv = nullptr; DStat st; bool fire = false;
+	ID3D11Resource *prev = nullptr; ID3D11RenderTargetView *prev_rtv = nullptr; DStat st; bool fire = false; int vr_fire = -1;
 	{
 		std::lock_guard<std::mutex> lk(g_mx);
 		auto it = g_cur_dsv.find(cmd);
@@ -484,6 +502,10 @@ static void on_bind_rt_ds(command_list *cmd, uint32_t count, const resource_view
 		auto ir = g_cur_rtv.find(cmd);
 		if (ir != g_cur_rtv.end()) prev_rtv = ir->second;
 		g_cur_dsv[cmd] = r; g_cur_rtv[cmd] = rv;
+		if (g_vr) { Eye *e = eye_of(r); if (e && e->order < 0) e->order = g_eye_order_n++; }
+		if (g_vr && cfg.vr_on && prev && prev != r && prev_rtv)
+			for (int k = 0; k < 2; k++)
+				if (g_final_dsv[k] == prev && !g_final_done[k]) { g_final_done[k] = true; vr_fire = g_final_n++; }
 		// fim de uma passada do pod: a imagem dele esta pronta e ainda nao foi usada nos MFDs -> desenha a explosao nela
 		if (cfg.pod_on && prev && prev != r && prev_rtv && is_pod(prev))
 		{
@@ -491,6 +513,11 @@ static void on_bind_rt_ds(command_list *cmd, uint32_t count, const resource_view
 			if (is != g_dstat.end() && is->second.since_clear >= (uint32_t)cfg.pod_min_draws / 2 && is->second.cam.p && is->second.cam.v)
 			{ st = is->second; fire = true; }
 		}
+	}
+	if (vr_fire >= 0 && vr_fire < 2 && (ID3D11DeviceContext *)cmd->get_native() == G.ctx)
+	{
+		int want = cfg.vr_swap ? 1 - vr_fire : vr_fire;
+		for (auto &e : g_eye) if (e.dsv && e.order == want) { vr_inject(G.ctx, e, prev_rtv, vr_fire); break; }
 	}
 	if (fire)
 	{
@@ -505,6 +532,7 @@ static void count_draw(command_list *cmd)
 	if (it == g_cur_dsv.end() || !it->second) return;
 	DStat &s = g_dstat[it->second]; s.draws++; s.since_clear++;
 	if (g_any.p && g_any.v) s.cam = g_any;
+	if (g_any3.ok) s.cam3 = g_any3;
 	auto ir = g_cur_rtv.find(cmd);
 	if (ir != g_cur_rtv.end() && ir->second && !s.has_rt)
 	{
@@ -539,6 +567,12 @@ static bool on_clear_ds(command_list *cmd, resource_view dsv, const float *depth
 		copy_depth((ID3D11DeviceContext *)cmd->get_native(), r);
 		g_copied_draws = it->second.since_clear;
 	}
+	if (Eye *e = eye_of(r))
+		if (it->second.since_clear >= (uint32_t)cfg.depth_min_draws && it->second.since_clear > e->copied && it->second.cam3.ok)
+		{
+			copy_depth_to(e->scene, (ID3D11DeviceContext *)cmd->get_native(), r);
+			e->cam = it->second.cam3; e->have_scene = e->scene.valid; e->copied = it->second.since_clear;
+		}
 	it->second.since_clear = 0; it->second.clears++;
 	return false;
 }
@@ -575,6 +609,54 @@ static void depth_end_frame()
 		}
 		logf("  copia principal: %u desenhos; cabine neste quadro: %d", g_copied_draws, (int)g_dc2_frame);
 	}
+	// ---- VR: olhos (as duas passadas com mais desenhos fora do tamanho da tela, campo largo) e as passadas finais de cada olho
+	{
+		static uint64_t fr = 0; fr++;
+		struct Cd { ID3D11Resource *r; uint32_t draws; UINT w, h; };
+		std::vector<Cd> cds;
+		for (auto &kv : g_dstat)
+		{
+			const DStat &d = kv.second;
+			if (kv.first == g_sel || tex_matches_screen(kv.first) || !d.has_rt || d.draws < 150 || !d.cam3.ok) continue;
+			if (vlen3(d.cam3.B) < 0.35f) continue;	// campo de visao estreito: nao e olho (pod, espelhos pequenos...)
+			ID3D11Texture2D *t = nullptr; D3D11_TEXTURE2D_DESC td = {};
+			if (SUCCEEDED(kv.first->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&t))) { t->GetDesc(&td); t->Release(); }
+			if (td.Width < 800 || td.Height < 800) continue;
+			cds.push_back({kv.first, d.draws, td.Width, td.Height});
+		}
+		std::sort(cds.begin(), cds.end(), [](const Cd &a, const Cd &b) { return a.draws > b.draws; });
+		for (size_t i = 0; i < cds.size() && i < 2; i++)
+		{
+			if (i == 1 && (cds[1].w != cds[0].w || cds[1].h != cds[0].h)) break;
+			Eye *e = eye_of(cds[i].r);
+			if (!e) for (auto &x : g_eye) if (!x.dsv) { e = &x; e->dsv = cds[i].r; e->w = cds[i].w; e->h = cds[i].h; if (cfg.vr_log) { const VP3 &q = g_dstat[cds[i].r].cam3; float fl = vlen3(q.A); float offx = (q.A[0] * q.B[0] + q.A[1] * q.B[1] + q.A[2] * q.B[2]) / std::max(1e-6f, vlen3(q.B)), offy = (q.A[0] * q.C[0] + q.A[1] * q.C[1] + q.A[2] * q.C[2]) / std::max(1e-6f, vlen3(q.C)); logf("VR: olho detectado - profundidade %p %ux%u, %u desenhos; meio-campo H %.1f V %.1f graus, descentro H %.3f V %.3f (tangente), plano proximo %.3f, |A| %.3f", (void *)cds[i].r, cds[i].w, cds[i].h, cds[i].draws, atanf(vlen3(q.B)) * 57.2958f, atanf(vlen3(q.C)) * 57.2958f, offx, offy, q.nearv, fl); }; break; }
+			if (e) e->seen = fr;
+		}
+		int ne = 0;
+		for (auto &e : g_eye) { if (e.dsv && fr - e.seen > 90) { e.scene.release(); e.cock.release(); e = Eye(); } if (e.dsv) ne++; }
+		bool was = g_vr; g_vr = cfg.vr_on && ne > 0 && !g_sel;	// (no monitor sempre ha uma profundidade do tamanho da tela)
+		if (g_vr != was && cfg.vr_log) logf(g_vr ? "VR: desenhando as explosoes em cada olho (%d olho(s))" : "VR: sem olhos detectados - volta ao modo monitor", ne);
+		// passadas finais: alvo RGBA8 sem MSAA do tamanho do olho, com profundidade propria (nao a do olho)
+		g_final_dsv[0] = g_final_dsv[1] = nullptr;
+		if (g_vr)
+		{
+			UINT ew = 0, eh = 0; for (auto &e : g_eye) if (e.dsv) { ew = e.w; eh = e.h; }
+			std::vector<std::pair<uint32_t, ID3D11Resource *>> fin;
+			for (auto &kv : g_dstat)
+			{
+				const DStat &d = kv.second;
+				if (eye_of(kv.first) || !d.has_rt || d.rw != ew || d.rh != eh) continue;
+				if (d.rfmt != 28 && d.rfmt != 29 && d.rfmt != 87 && d.rfmt != 91) continue;
+				fin.push_back({d.draws, kv.first});
+			}
+			std::sort(fin.begin(), fin.end(), [](const std::pair<uint32_t, ID3D11Resource *> &a, const std::pair<uint32_t, ID3D11Resource *> &b) { return a.first > b.first; });
+			for (size_t i = 0; i < fin.size() && i < 2; i++) g_final_dsv[i] = fin[i].second;
+			static int told = 0;
+			if (cfg.vr_log && told < 3 && (fin.size() != 2 || told == 0)) { told++; logf("VR: %zu passada(s) final(is) candidata(s) (esperado 2)", fin.size()); }
+		}
+		for (auto &e : g_eye) { e.order = -1; e.have_scene = false; e.copied = 0; }
+		g_eye_order_n = 0; g_final_n = 0; g_final_done[0] = g_final_done[1] = false;
+	}
 	// pod de mira: passadas com alvo de cor, muitos desenhos e campo de visao estreito (pode haver mais de uma: NFOV, WFOV,
 	// copias para os dois MFDs). Cada uma fica no conjunto enquanto aparecer pelo menos a cada 60 quadros.
 	{
@@ -584,7 +666,7 @@ static void depth_end_frame()
 		for (auto &kv : g_dstat)
 		{
 			const DStat &d = kv.second;
-			if (kv.first == g_sel || !d.has_rt || d.draws < (uint32_t)cfg.pod_min_draws) continue;
+			if (kv.first == g_sel || eye_of(kv.first) || !d.has_rt || d.draws < (uint32_t)cfg.pod_min_draws) continue;
 			if (!d.cam.p || !d.cam.v || d.cam.tanv <= 0 || d.cam.tanv > tmax) continue;
 			PodSlot *slot = nullptr;
 			for (auto &p : g_pods) if (p.dsv == kv.first) slot = &p;
@@ -735,6 +817,7 @@ static void on_init_swapchain(swapchain *sc, bool)
 {
 	device *dev = sc->get_device();
 	if (!dev || dev->get_api() != device_api::d3d11) { logf("API grafica nao e D3D11 - add-on inativo"); return; }
+	if (G.dev && (ID3D11Device *)dev->get_native() != G.dev) { logf("swapchain de outro dispositivo - ignorado"); return; }
 	ID3D11Texture2D *bb = back_buffer(sc);
 	if (!bb) { logf("ERRO: sem back buffer"); return; }
 	D3D11_TEXTURE2D_DESC d; bb->GetDesc(&d);
@@ -745,17 +828,24 @@ static void on_init_swapchain(swapchain *sc, bool)
 		if (!init_gfx(dev)) { logf("inicializacao falhou - add-on desligado"); G.release(); G.dev = nullptr; }
 	}
 }
-static void on_destroy_swapchain(swapchain *, bool)
+static void on_destroy_swapchain(swapchain *sc, bool)
 {
+	if (G.dev && sc && sc->get_device() && (ID3D11Device *)sc->get_device()->get_native() != G.dev) return;
+	logf("swapchain destruido");
 	std::lock_guard<std::mutex> lk(g_mx);
 	for (auto &kv : G.bb_rtv) kv.second->Release();
 	G.bb_rtv.clear();
 	g_dstat.clear(); g_cur_dsv.clear(); g_sel = nullptr;
 	g_dc.release(); g_dc2.release(); g_dcp.release();
 }
-static void on_destroy_device(device *)
+static void on_destroy_device(device *dev)
 {
+	// so interessa o dispositivo do jogo: em VR o runtime (Oculus/OpenXR) cria e destroi dispositivos proprios no mesmo processo
+	ID3D11Device *nd = dev && dev->get_api() == device_api::d3d11 ? (ID3D11Device *)dev->get_native() : nullptr;
+	if (G.dev && nd != G.dev) { logf("outro dispositivo destruido (%p; o do jogo e %p) - ignorado", (void *)nd, (void *)G.dev); return; }
+	logf("dispositivo do jogo destruido");
 	std::lock_guard<std::mutex> lk(g_mx);
+	for (auto &e : g_eye) { e.scene.release(); e.cock.release(); e = Eye(); } g_vr = false;
 	g_load_dev = nullptr; g_dc.release(); g_dc2.release(); g_dcp.release(); release_all_volumes(); G.release();
 }
 
@@ -1045,8 +1135,14 @@ static void fill_light(CB &cb, double tnow, double *sd)
 }
 
 
+static uint32_t g_draws_total = 0;
 static void on_present(command_queue *, swapchain *sc, const rect *, const rect *, uint32_t, const rect *)
 {
+	{	// diagnostico: o add-on esta recebendo os quadros?
+		static DWORD t0 = 0, last = 0; static uint32_t np = 0; np++;
+		DWORD now = GetTickCount(); if (!t0) { t0 = last = now; logf("primeiro quadro apresentado (ok=%d)", (int)G.ok); }
+		if (now - last > 30000) { logf("vivo: %u quadros em 30 s, ok=%d, memoria compartilhada=%d, explosoes ativas=%d", np, (int)G.ok, g_sh ? 1 : 0, (int)g_have_spawn); np = 0; last = now; }
+	}
 	if (!G.ok) return;
 	g_frame++;
 	depth_end_frame();
@@ -1119,7 +1215,7 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 	}
 	std::sort(jobs.begin(), jobs.end(), [](const Job &a, const Job &b) { return a.dist2 > b.dist2; });
 	reap_sounds();
-	bool draw = have_cam && !jobs.empty();
+	bool draw = have_cam && !jobs.empty() && !g_vr;	// em VR o desenho e feito em cada olho (vr_inject); o espelho copia o olho
 	if (!draw && !want_probe) return;
 
 	ID3D11RenderTargetView *rtv = bb_rtv_for(sc);
@@ -1370,6 +1466,117 @@ static void pod_inject(ID3D11DeviceContext *ctx, ID3D11Resource *dsv, ID3D11Rend
 	if (prev) prev->Release();
 	static DWORD told = 0;
 	if (cfg.pod_log && GetTickCount() - told > 10000) { told = GetTickCount(); logf("pod de mira: %zu explosao(oes) desenhada(s) na imagem do pod (%ux%u fmt %d, fov %.2f graus)", jobs.size(), rd.Width, rd.Height, (int)rd.Format, atanf(tanv) * 114.5916f); }
+}
+
+// ---------------------------------------------------------------- VR: desenha as explosoes na imagem final de um olho
+static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *rtv, int idx)
+{
+	if (!g_sh || !G.ok || !G.ps[0] || !g_have_spawn || !rtv) return;
+	Cam cam;
+	if (!read_cam(cam)) return;
+	ID3D11Resource *rr = nullptr; rtv->GetResource(&rr);
+	if (!rr) return;
+	ID3D11Texture2D *rt = nullptr; D3D11_TEXTURE2D_DESC rd = {};
+	if (SUCCEEDED(rr->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&rt))) { rt->GetDesc(&rd); rt->Release(); }
+	rr->Release();
+	if (!rd.Width || rd.SampleDesc.Count != 1) return;
+	// camera deste olho: se a cena nao foi copiada numa limpeza (vista sem cabine), usa a profundidade e a camera atuais
+	VP3 vp = e.cam; bool mask = false;
+	{
+		std::lock_guard<std::mutex> lk(g_mx);
+		auto it = g_dstat.find(e.dsv);
+		if (!e.have_scene) { if (it == g_dstat.end() || !it->second.cam3.ok) return; vp = it->second.cam3; }
+	}
+	if (!vp.ok) return;
+	struct PJ { int k; double t; float fade; double d2; };
+	std::vector<PJ> jobs;
+	for (int k = 0; k < MAXI; k++)
+	{
+		Inst &I = g_inst[k];
+		if (!I.on || !VOL(I).ready) continue;
+		Volume &vol = VOL(I);
+		double t = (cam.t - I.t0) * I.rate;
+		if (g_freeze) t = 13.0 * vol.t_end / 23.5;
+		else if (cfg.freeze_t >= 0) t = cfg.freeze_t;
+		if (t < 0) continue;
+		float hold = std::min(cfg.hold_s, vol.t_end + 0.5f), fend = hold + (cfg.fade_end - cfg.hold_s);
+		float fade = t > hold ? (float)std::max(0.0, 1.0 - (t - hold) / std::max(0.1f, fend - hold)) : 1.f;
+		if (fade <= 0.f) continue;
+		double dx = cam.p[0] - I.p[0], dy = cam.p[1] - I.p[1], dz = cam.p[2] - I.p[2];
+		jobs.push_back({k, t, fade, dx * dx + dy * dy + dz * dz});
+	}
+	if (jobs.empty()) return;
+	std::sort(jobs.begin(), jobs.end(), [](const PJ &a, const PJ &b) { return a.d2 > b.d2; });
+
+	ID3DDeviceContextState *prev = nullptr;
+	G.ctx1->SwapDeviceContextState(G.state, &prev);
+	if (e.have_scene) { copy_depth_to(e.cock, ctx, e.dsv); mask = cfg.cockpit_mask && e.cock.valid && e.cock.samples == e.scene.samples; }
+	else copy_depth_to(e.scene, ctx, e.dsv);
+	// raio do pixel = A + ndc.x * B + ndc.y * C: vai nos campos da camera (frente = A, direita = B, cima = C, escalas 1)
+	for (int i = 0; i < 3; i++) { cam.x[i] = vp.A[i]; cam.z[i] = vp.B[i]; cam.y[i] = vp.C[i]; }
+	float nearm = vp.nearv > 0.f ? vp.nearv : 0.02f;
+	CB cb = {};
+	cb.screen[0] = (float)rd.Width; cb.screen[1] = (float)rd.Height; cb.screen[2] = 1.f / rd.Width; cb.screen[3] = 1.f / rd.Height;
+	cb.depthInfo[0] = e.scene.valid ? 1.f : 0.f; cb.depthInfo[1] = (float)cfg.reversed; cb.depthInfo[2] = (float)e.scene.w; cb.depthInfo[3] = (float)e.scene.h;
+	cb.misc[0] = std::max(60.f, cfg.max_steps * cfg.vr_steps);
+	cb.nearInfo[0] = mask ? 1.f : 0.f; cb.nearInfo[1] = cfg.reversed ? nearm / 5.0f : 1.f - nearm / 5.0f;
+	double sd[3]; fill_light(cb, cam.t, sd);
+	common_state(cb);
+	D3D11_VIEWPORT vp0 = {0, 0, (float)rd.Width, (float)rd.Height, 0, 1};
+	bool ms = e.scene.valid && e.scene.samples > 1;
+	float rz = g_sh->opt_realism >= 0 ? g_sh->opt_realism : cfg.realism;
+	int saved_flip = cfg.flip_right; cfg.flip_right = 0;
+	for (const PJ &J : jobs)
+	{
+		Inst &I = g_inst[J.k];
+		Volume &vol = VOL(I);
+		int i0 = 0; float w = 0.f;
+		if (J.t >= vol.times.back()) i0 = vol.nf - 1;
+		else if (J.t > vol.times[0]) { while (i0 + 1 < vol.nf - 1 && vol.times[i0 + 1] <= J.t) i0++; w = (float)((J.t - vol.times[i0]) / (vol.times[i0 + 1] - vol.times[i0])); }
+		int i1 = std::min(i0 + 1, vol.nf - 1);
+		if (!I.sun || I.sx != vol.nx || I.sy != vol.ny || I.sz != vol.nz)
+		{
+			SR(I.uav); SR(I.srv); SR(I.sun);
+			D3D11_TEXTURE3D_DESC td = {}; td.Width = vol.nx; td.Height = vol.ny; td.Depth = vol.nz; td.MipLevels = 1;
+			td.Format = DXGI_FORMAT_R16_FLOAT; td.Usage = D3D11_USAGE_DEFAULT; td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+			if (FAILED(G.dev->CreateTexture3D(&td, nullptr, &I.sun)) || FAILED(G.dev->CreateUnorderedAccessView(I.sun, nullptr, &I.uav)) ||
+				FAILED(G.dev->CreateShaderResourceView(I.sun, nullptr, &I.srv))) { SR(I.uav); SR(I.srv); SR(I.sun); continue; }
+			I.sx = vol.nx; I.sy = vol.ny; I.sz = vol.nz;
+		}
+		setup_job_cb(cb, I, vol, cam, sd, J.t, J.fade, w);
+		cb.camF[3] = 1.f; cb.camR[3] = 1.f; cb.camU[3] = nearm;
+		cb.camO[3] *= cfg.vr_step_scale;
+		cb.shock2[1] = (float)(J.t / I.rate); cb.shock2[2] = (1.0f + (cfg.firelight - 1.0f) * (rz > 0.5f ? 1.f : 0.f)) * (1.f + cfg.night_glow * g_night); cb.shock2[3] = rz;
+		G.ctx->UpdateSubresource(G.cb, 0, nullptr, &cb, 0, 0);
+		if (idx == 0)	// sombra do sol dentro da nuvem: uma vez por quadro (no primeiro olho)
+		{
+			ID3D11ShaderResourceView *csr[3] = {vol.A[i0], nullptr, vol.A[i1]};
+			G.ctx->CSSetShader(G.cs_sun, nullptr, 0);
+			G.ctx->CSSetShaderResources(0, 3, csr); bind_bc(vol, i0, i1, true);
+			G.ctx->CSSetUnorderedAccessViews(0, 1, &I.uav, nullptr);
+			G.ctx->Dispatch((vol.nx + 3) / 4, (vol.ny + 3) / 4, (vol.nz + 3) / 4);
+			unbind_bc(true);
+			ID3D11UnorderedAccessView *nuav = nullptr; G.ctx->CSSetUnorderedAccessViews(0, 1, &nuav, nullptr);
+			ID3D11ShaderResourceView *ncs[3] = {}; G.ctx->CSSetShaderResources(0, 3, ncs);
+		}
+		G.ctx->OMSetRenderTargets(1, &rtv, nullptr);
+		G.ctx->OMSetBlendState(G.blend, nullptr, 0xffffffff);
+		G.ctx->RSSetViewports(1, &vp0);
+		G.ctx->PSSetShader(G.ps[ms ? 1 : 0], nullptr, 0);
+		ID3D11SamplerState *smp[2] = {G.samp, G.samp_wrap}; G.ctx->PSSetSamplers(0, 2, smp);
+		ID3D11ShaderResourceView *srv[8] = {vol.A[i0], vol.B[i0], vol.A[i1], vol.B[i1], e.scene.valid ? e.scene.srv : nullptr, mask ? e.cock.srv : nullptr, I.srv, G.noise_srv};
+		G.ctx->PSSetShaderResources(0, 8, srv); bind_bc(vol, i0, i1, false);
+		G.ctx->Draw(3, 0);
+		unbind_bc(false);
+		ID3D11ShaderResourceView *nul[8] = {};
+		G.ctx->PSSetShaderResources(0, 8, nul);
+	}
+	cfg.flip_right = saved_flip;
+	ID3D11RenderTargetView *nrt = nullptr; G.ctx->OMSetRenderTargets(1, &nrt, nullptr);
+	G.ctx1->SwapDeviceContextState(prev, nullptr);
+	if (prev) prev->Release();
+	static DWORD told = 0;
+	if (cfg.vr_log && GetTickCount() - told > 15000) { told = GetTickCount(); logf("VR: %zu explosao(oes) desenhada(s) no olho %d (alvo %ux%u fmt %d, profundidade %s%s, plano proximo %.3f)", jobs.size(), idx, rd.Width, rd.Height, (int)rd.Format, e.have_scene ? "da cena" : "atual", mask ? " + mascara da cabine" : "", nearm); }
 }
 
 // ---------------------------------------------------------------- registro

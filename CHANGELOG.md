@@ -5,6 +5,8 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 ## Unreleased - in testing / Em teste (ainda não lançado)
 
 **English**
+- **VR (OpenXR):** explosions are now drawn inside the headset, once per eye, with each eye's own off-centre projection. Confirmed on Quest 3 through Quest Link. No shock wave refraction in VR yet, and VR uses a lighter ray-march quality.
+- **VR fixes:** the add-on no longer shuts itself down when the VR runtime destroys one of its own graphics devices, and the periodic camera search that caused stutter in VR is gone.
 - **Targeting pod:** explosions are now also drawn in the targeting pod image (MFD). The add-on finds the pod's own render pass (narrow field of view) and draws the explosion there with the pod camera. Confirmed working in game (F-16C).
 - **Night lighting:** with the sun below the horizon the smoke no longer receives daytime sky and ground light (it was showing up light grey at night), distance haze goes dark, and fire and fire-lit smoke get brighter, as seen by a dark-adapted eye. In testing.
 - **New installer look:** dark custom interface with in-game screenshots, Install / Options / Log tabs, PT/EN switch, support by PayPal or Pix (QR Code) and Discord / Instagram / GitHub links.
@@ -21,6 +23,8 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 - **Blender:** `nightzim_boom` add-on 0.2.0 opens the mod's `.nzv` volumes as animated OpenVDB volumes.
 
 **Português**
+- **VR (OpenXR):** as explosões agora são desenhadas dentro do óculos, uma vez por olho, com a projeção descentrada de cada olho. Confirmado no Quest 3 pelo Quest Link. Ainda sem a refração da onda de choque no VR, e o VR usa uma qualidade de traçado mais leve.
+- **Correções no VR:** o add-on não se desliga mais quando o runtime de VR destrói um dispositivo gráfico próprio, e a busca periódica da câmera que causava engasgos no VR acabou.
 - **Pod de mira (targeting pod):** as explosões passam a ser desenhadas também na imagem do pod (MFD). O add-on acha a passada própria do pod (campo de visão estreito) e desenha a explosão ali com a câmera do pod. Confirmado no jogo (F-16C).
 - **Iluminação noturna:** com o sol abaixo do horizonte a fumaça deixa de receber a luz diurna do céu e do chão (ela aparecia cinza-clara à noite), a névoa de distância escurece, e o fogo e a fumaça iluminada por ele ficam mais fortes, como para um olho adaptado ao escuro. Em teste.
 - **Instalador com visual novo:** interface escura própria com capturas do jogo, abas Instalação / Opções / Registro, troca PT/EN, apoio por PayPal ou Pix (QR Code) e links de Discord / Instagram / GitHub.
