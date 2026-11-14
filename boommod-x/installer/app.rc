@@ -8,8 +8,8 @@
 106 RCDATA "ic_instagram.png"
 107 RCDATA "ic_pix.png"
 1 VERSIONINFO
-FILEVERSION 1,1,0,0
-PRODUCTVERSION 1,1,0,0
+FILEVERSION 1,2,0,0
+PRODUCTVERSION 1,2,0,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -18,8 +18,8 @@ BEGIN
       VALUE "CompanyName", "Nightzim"
       VALUE "FileDescription", "Nightzim BoomMod X - instalador"
       VALUE "ProductName", "Nightzim BoomMod X"
-      VALUE "ProductVersion", "1.1"
-      VALUE "FileVersion", "1.1"
+      VALUE "ProductVersion", "1.2"
+      VALUE "FileVersion", "1.2"
     END
   END
   BLOCK "VarFileInfo"

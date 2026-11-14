@@ -590,7 +590,7 @@ static void render(Bitmap &back)
 		fill_rr(g, RectF(30, yb + 72, 46, 4), 2, C_ACC);
 		text(g, T(L"Explosões volumétricas simuladas\npara o DCS World", L"Simulated volumetric explosions\nfor DCS World"), RectF(30, yb + 88, 350, 48), 16, Color(235, 232, 234, 237), 0, FontStyleRegular, L"Segoe UI", true);
 		fill_rr(g, RectF(30, CH - 40.f, 54, 22), 11, Color(70, 255, 255, 255));
-		text(g, L"v1.1", RectF(30, CH - 40.f, 54, 22), 12, Color(255, 255, 255, 255), 1, FontStyleBold);
+		text(g, L"v1.2", RectF(30, CH - 40.f, 54, 22), 12, Color(255, 255, 255, 255), 1, FontStyleBold);
 		text(g, T(L"Capturas feitas no jogo", L"Captured in game"), RectF(94, CH - 40.f, 260, 22), 11.5f, Color(170, 232, 234, 237));
 	}
 	// ---- abas
