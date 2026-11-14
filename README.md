@@ -1,6 +1,31 @@
 # Nightzim BoomMod
 
-> **NEW: Nightzim BoomMod X v1.0** - volumetric explosions drawn on top of the game (ReShade add-on), triggered by real bombs, rockets and missiles. How it works and what every file does: [BoomModX.md](BoomModX.md) - update notes and credits: [CHANGELOG.md](CHANGELOG.md)
+## Nightzim BoomMod X - volumetric explosions, now with VR
+
+**Latest: BoomMod X v1.2 - VR support (OpenXR).** Download: https://github.com/fcirera/Nightzim-BoomMod/releases/latest
+
+BoomMod X is the volumetric line of the mod. A ReShade add-on ray-marches the simulated explosion volumes on top of the game, using the scene depth, the sun and the wind, and a Lua hook triggers them from the real bombs, rockets, missiles and tank shells, in single player and multiplayer.
+
+- **VR (OpenXR)** - explosions are drawn inside the headset, once per eye, with each eye's own projection. Confirmed on Meta Quest 3 through Quest Link.
+- **Targeting pod** - explosions also show up in the pod image on the MFD.
+- **Night lighting** - at night the smoke goes dark and is lit by the fire.
+- **Napalm** - the fire strip ignites from the impact end to the other, along the bomb's heading.
+- **VRAM control** - choose which explosions to load and how many variations of each, with the video memory added up as you choose; optional compression.
+- **Installer** - activate, disable or uninstall with backups; options and VRAM tabs; Portuguese and English.
+
+Requirements: DCS World (DirectX 11) and ReShade 6.x **with full add-on support** installed for `bin\DCS.exe` (DirectX 10/11/12 only; the OpenXR option of the ReShade installer is not needed, VR included).
+
+Install: download the zip from the latest release, extract it whole, close DCS, run `BoomModX_Instalador.exe` and click **Install / Activate**.
+
+VR notes: after entering the cockpit, give it up to a minute before the first explosion so the add-on can find the game camera. The shock wave refraction is not in VR yet, and VR uses a lighter ray-march quality. Tested on one headset so far; reports from other headsets and runtimes are welcome.
+
+More: how it works and what every file does in [BoomModX.md](BoomModX.md), update notes and credits in [CHANGELOG.md](CHANGELOG.md), sources and current test build in [`boommod-x/`](boommod-x/).
+
+---
+
+## Classic BoomMod (particle effects, v3.x)
+
+The original line of the mod, which replaces the stock particle effects. Kept here for reference; BoomMod X above is the current one.
 
 Physically simulated explosion effects for **DCS World**.
 
@@ -30,7 +55,7 @@ Instead of hand-drawing an explosion, BoomMod simulates it: a custom solver comp
 | `groundExplosion_napalm` | `nightzim_napalm_01` | napalm |
 | `T90A_shot_exp_b` | `nightzim_tankshot_01` | tank shell impact |
 
-**Download:** https://github.com/fcirera/Nightzim-BoomMod/releases/latest
+**Download (classic):** https://github.com/fcirera/Nightzim-BoomMod/releases/tag/v3.2c
 
 ## Beta
 
