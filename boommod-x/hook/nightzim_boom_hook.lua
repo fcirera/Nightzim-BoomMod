@@ -172,7 +172,8 @@ local function ignorable(n)
 	return n == "" or string.find(n, "FLARE") or string.find(n, "CHAFF") or string.find(n, "BULLET") or string.find(n, "SHELL") or
 		string.find(n, "PARACHUTE") or string.find(n, "SMOKE") or string.find(n, "LUU") or string.find(n, "_TRACER") or
 		string.find(n, "SEAT") or string.find(n, "PILOT") or string.find(n, "FUEL") or string.find(n, "FPU") or string.find(n, "PTB") or
-		string.find(n, "CANOPY") or string.find(n, "TANK ")
+		string.find(n, "CANOPY") or string.find(n, "TANK ") or
+		string.find(n, "MK77MOD", 1, true)	-- A-4E-C: o corpo da Mk-77 some a ~35 m e solta o NAPALM_MOD, que e quem conta
 end
 
 -- tiro de canhao de tanque: granada nova perto de um blindado -> sopro na boca do cano, na direcao do cano

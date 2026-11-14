@@ -5,6 +5,8 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 ## Unreleased - in testing / Em teste (ainda não lançado)
 
 **English**
+- **Fix (v1.2.1): game closing at start on some installs.** When another program in the DCS process created a tiny 64x64 test window before the game's own screen (seen on a Steam install), the add-on initialised on it and was then unloaded by ReShade while still loading the explosion volumes. The add-on now ignores screens smaller than 320x200 and stays in memory until DCS closes. Confirmed working on the developer's PC; thanks to the user who sent the logs.
+- **Fix: A-4E-C Mk-77 napalm drew two explosions.** The mod's bomb body opens about 35 m above the ground and releases the napalm itself; the hook counted the body as an air burst on top of the napalm. It now counts only the napalm.
 - **VR (OpenXR):** explosions are now drawn inside the headset, once per eye, with each eye's own off-centre projection. Confirmed on Quest 3 through Quest Link. No shock wave refraction in VR yet, and VR uses a lighter ray-march quality.
 - **VR fixes:** the add-on no longer shuts itself down when the VR runtime destroys one of its own graphics devices, and the periodic camera search that caused stutter in VR is gone.
 - **Targeting pod:** explosions are now also drawn in the targeting pod image (MFD). The add-on finds the pod's own render pass (narrow field of view) and draws the explosion there with the pod camera. Confirmed working in game (F-16C).
@@ -23,6 +25,8 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 - **Blender:** `nightzim_boom` add-on 0.2.0 opens the mod's `.nzv` volumes as animated OpenVDB volumes.
 
 **Português**
+- **Correção (v1.2.1): jogo fechando ao abrir em algumas instalações.** Quando outro programa dentro do processo do DCS criava uma janela de teste de 64x64 antes da tela do jogo (visto numa instalação Steam), o add-on inicializava nela e depois era descarregado pelo ReShade ainda carregando os volumes das explosões. Agora o add-on ignora telas menores que 320x200 e fica na memória até o DCS fechar. Confirmado no PC do desenvolvedor; obrigado ao usuário que mandou os logs.
+- **Correção: o napalm Mk-77 do A-4E-C desenhava duas explosões.** O corpo da bomba do mod se abre a cerca de 35 m do chão e solta o napalm; o hook contava o corpo como explosão aérea além do napalm. Agora conta só o napalm.
 - **VR (OpenXR):** as explosões agora são desenhadas dentro do óculos, uma vez por olho, com a projeção descentrada de cada olho. Confirmado no Quest 3 pelo Quest Link. Ainda sem a refração da onda de choque no VR, e o VR usa uma qualidade de traçado mais leve.
 - **Correções no VR:** o add-on não se desliga mais quando o runtime de VR destrói um dispositivo gráfico próprio, e a busca periódica da câmera que causava engasgos no VR acabou.
 - **Pod de mira (targeting pod):** as explosões passam a ser desenhadas também na imagem do pod (MFD). O add-on acha a passada própria do pod (campo de visão estreito) e desenha a explosão ali com a câmera do pod. Confirmado no jogo (F-16C).

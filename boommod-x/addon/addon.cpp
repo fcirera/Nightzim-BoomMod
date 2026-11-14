@@ -28,7 +28,8 @@ static FILE *g_log = nullptr;
 
 static void logf(const char *fmt, ...)
 {
-	if (!g_log) { g_log = fopen((g_dir + "NightzimBoom.log").c_str(), "w"); if (!g_log) return; }
+	static bool s_opened = false;
+	if (!g_log) { g_log = fopen((g_dir + "NightzimBoom.log").c_str(), s_opened ? "a" : "w"); if (!g_log) return; s_opened = true; }
 	SYSTEMTIME st; GetLocalTime(&st);
 	fprintf(g_log, "%02d:%02d:%02d.%03d ", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
 	va_list a; va_start(a, fmt); vfprintf(g_log, fmt, a); va_end(a);
@@ -821,6 +822,8 @@ static void on_init_swapchain(swapchain *sc, bool)
 	ID3D11Texture2D *bb = back_buffer(sc);
 	if (!bb) { logf("ERRO: sem back buffer"); return; }
 	D3D11_TEXTURE2D_DESC d; bb->GetDesc(&d);
+	// janelas de teste (overlays e sondas criam um dispositivo de 64x64 que dura menos de 1 s): nao e o jogo
+	if (d.Width < 320 || d.Height < 200) { logf("swapchain de teste %ux%u - ignorado", d.Width, d.Height); return; }
 	g_bb_w = d.Width; g_bb_h = d.Height;
 	logf("swapchain %ux%u formato %d", g_bb_w, g_bb_h, (int)d.Format);
 	if (!G.dev && !G.ok)
@@ -1586,6 +1589,8 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE addon_module, HMODULE re
 	std::string s = p; s = s.substr(0, s.find_last_of("\\/") + 1) + "NightzimBoom\\";
 	g_dir = s;
 	if (!reshade::register_addon(addon_module, reshade_module)) return false;
+	// o ReShade descarrega o add-on quando o ultimo dispositivo some; as nossas threads de carga nao podem ficar sem o codigo
+	{ HMODULE pin = nullptr; GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, (LPCSTR)&AddonInit, &pin); }
 	logf("Nightzim BoomMod V carregado (%s)", g_dir.c_str());
 	load_config();
 	open_shm();
