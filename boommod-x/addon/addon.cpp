@@ -52,7 +52,7 @@ struct Config
 	float detail = 0.8f, detail_scale = 12.f, fire_gain = 0.6f, flame_min_t = 1450.f, edge_fade = 0.08f;
 	float fog_dist = 15000.f, fog_r = 0.62f, fog_g = 0.68f, fog_b = 0.76f, hold_s = 24.f, fade_end = 40.f, freeze_t = -1.f;
 	float night_ambient = 0.02f, night_fire = 1.5f, night_glow = 2.0f;	// noite: luz ambiente minima, ganho do fogo e da luz do fogo na fumaca
-	int vram_n[7] = {-1, -1, -1, -1, -1, -1, -1};	// variacoes por tipo escolhidas no instalador (0 = tipo desligado; -1 = usar vram_var)
+	int vram_n[8] = {-1, -1, -1, -1, -1, -1, -1, 0};	// variacoes por tipo escolhidas no instalador (0 = tipo desligado; -1 = usar vram_var)
 	int vram_var = 2, vram_lazy = 1, vram_bc = 0;	// variacoes por tipo na VRAM, carregar so quando usar, comprimir (0 nao, 1 = metade/BC5, 2 = um quarto/BC7)
 	int vr_on = 1, vr_swap = 0, vr_log = 1; float vr_steps = 0.6f, vr_step_scale = 1.5f;	// VR: desenhar em cada olho; qualidade reduzida
 	int pod_on = 1, pod_min_draws = 40, pod_log = 1; float pod_max_fov = 12.f;	// pod: campo estreito (NFOV ~1,3 graus, WFOV ~4,5)
@@ -104,6 +104,7 @@ static void load_config()
 		char b2[16]; GetPrivateProfileStringA("vram", "variedade", "media", b2, sizeof b2, (g_dir + "NightzimBoom.ini").c_str());
 		c.vram_var = !_stricmp(b2, "alta") ? 5 : !_stricmp(b2, "media") ? 2 : (atoi(b2) > 0 ? std::min(5, atoi(b2)) : 1);
 		{ const char *k[6] = {"n_jdam", "n_aerea", "n_pequena", "n_media", "n_napalm", "n_tanque"}; for (int i = 0; i < 6; i++) c.vram_n[i] = std::max(-1, std::min(5, (int)ini_f("vram", k[i], -1.f))); }
+		c.vram_n[7] = std::max(0, std::min(6, (int)ini_f("vram", "n_mk82n", 0.f)));	// Mk-82 Novo Shader: 0 = nenhuma (padrao), ate 6 variantes (1,2,3,4,7,8 da rodada) que entram no sorteio da Mk-82
 		c.vram_n[6] = c.vram_n[0] == 0 ? 0 : 1;	// JDAM classica: acompanha a JDAM, sempre uma so
 		c.vram_lazy = (int)ini_f("vram", "sob_demanda", (float)c.vram_lazy); c.vram_bc = (int)ini_f("vram", "comprimir", (float)c.vram_bc);
 	}
@@ -152,11 +153,11 @@ static bool read_cam(Cam &c)
 }
 
 // ---------------------------------------------------------------- volume .nzv
-static const int NTYPES = 7;	// 6 = JDAM classica (v1), usada no lugar da 0 quando escolhida
-static const char *TYPE_FILE[NTYPES] = {"jdam.nzv", "aerea.nzv", "nar.nzv", "mk82.nzv", "napalm.nzv", "tank.nzv", "jdam_v1.nzv"};
-static const char *TYPE_NAME[NTYPES] = {"JDAM", "aerea", "pequena", "media", "napalm", "tanque", "JDAM classica"};
-static const bool TYPE_GROUND[NTYPES] = {true, false, true, true, true, true, true};
-static const int MAXV = 5;	// variacoes por tipo: jdam.nzv, jdam_2.nzv ... jdam_5.nzv
+static const int NTYPES = 8;	// 6 = JDAM classica (v1), usada no lugar da 0 quando escolhida; 7 = Mk-82 Novo Shader (entra no sorteio da 3)
+static const char *TYPE_FILE[NTYPES] = {"jdam.nzv", "aerea.nzv", "nar.nzv", "mk82.nzv", "napalm.nzv", "tank.nzv", "jdam_v1.nzv", "mk82n.nzv"};
+static const char *TYPE_NAME[NTYPES] = {"JDAM", "aerea", "pequena", "media", "napalm", "tanque", "JDAM classica", "media novo shader"};
+static const bool TYPE_GROUND[NTYPES] = {true, false, true, true, true, true, true, true};
+static const int MAXV = 6;	// variacoes por tipo: jdam.nzv, jdam_2.nzv ... (ate 5; o Mk-82 Novo Shader vai ate 6)
 
 struct Volume
 {
@@ -293,7 +294,7 @@ static DWORD WINAPI loader_thread(LPVOID p)
 	// quais variacoes existem (limitadas pela opcao "variedade" do instalador)
 	for (int k = 0; k < NTYPES; k++)
 	{
-		int n = 0, lim = cfg.vram_n[k] >= 0 ? cfg.vram_n[k] : cfg.vram_var;
+		int n = 0, lim = cfg.vram_n[k] >= 0 ? cfg.vram_n[k] : cfg.vram_var; if (k != 7) lim = std::min(lim, 5);
 		for (int v = 0; v < MAXV && n < lim; v++) { DWORD a = GetFileAttributesA((g_dir + vol_file(k, v)).c_str()); if (a == INVALID_FILE_ATTRIBUTES) break; vols[k * MAXV + v].exists = true; n++; }
 		g_nvar[k] = n;
 	}
@@ -301,7 +302,7 @@ static DWORD WINAPI loader_thread(LPVOID p)
 	for (int k = 0; k < NTYPES; k++) if (g_nvar[k] > 0) load_volume(dev, k, 0); else if (cfg.vram_n[k] == 0) logf("explosao %s desligada no instalador (nao carregada)", TYPE_NAME[k]);
 	if (!cfg.vram_lazy)
 		for (int k = 0; k < NTYPES; k++) for (int v = 1; v < g_nvar[k]; v++) load_volume(dev, k, v);
-	logf("variacoes por tipo: jdam %d, aerea %d, pequena %d, media %d, napalm %d, tanque %d (padrao %d); %s, %s", g_nvar[0], g_nvar[1], g_nvar[2], g_nvar[3], g_nvar[4], g_nvar[5], cfg.vram_var, cfg.vram_lazy ? "extras carregam quando sorteadas" : "todas na abertura", cfg.vram_bc == 2 ? "comprimidas a 1/4 (BC7)" : cfg.vram_bc ? "comprimidas a 1/2 (BC5)" : "sem compressao");
+	logf("variacoes por tipo: jdam %d, aerea %d, pequena %d, media %d, napalm %d, tanque %d, mk82 novo shader %d (padrao %d); %s, %s", g_nvar[0], g_nvar[1], g_nvar[2], g_nvar[3], g_nvar[4], g_nvar[5], g_nvar[7], cfg.vram_var, cfg.vram_lazy ? "extras carregam quando sorteadas" : "todas na abertura", cfg.vram_bc == 2 ? "comprimidas a 1/4 (BC7)" : cfg.vram_bc ? "comprimidas a 1/2 (BC5)" : "sem compressao");
 	dev->Release();
 	return 0;
 }
@@ -926,8 +927,17 @@ static void poll_shared()
 	for (; g_spawn_seq_seen < seq; g_spawn_seq_seen++)
 	{
 		auto &e = g_sh->ring[g_spawn_seq_seen % NZ_RING];
-		if (e.type >= 0 && e.type < 6 && cfg.vram_n[e.type] == 0) continue;	// tipo desligado pelo usuario: sem explosao
+		bool novo = e.type == 3 && g_nvar[7] > 0 && vols[7 * MAXV].ready;	// Mk-82 Novo Shader disponivel
+		if (e.type >= 0 && e.type < 6 && cfg.vram_n[e.type] == 0 && !novo) continue;	// tipo desligado pelo usuario: sem explosao
 		int ty = (e.type >= 0 && e.type < 6 && vols[e.type * MAXV].ready) ? e.type : 0;
+		if (novo)
+		{
+			// Mk-82: cada variacao (antiga ou nova) tem a mesma chance de sair
+			static uint32_t rm = GetTickCount() * 3266489917u;
+			rm ^= rm << 13; rm ^= rm >> 17; rm ^= rm << 5;
+			int n3 = (cfg.vram_n[3] != 0 && vols[3 * MAXV].ready) ? g_nvar[3] : 0;
+			ty = (int)(rm % (uint32_t)(n3 + g_nvar[7])) < g_nvar[7] ? 7 : 3;
+		}
 		bool v1 = g_sh->opt_jdam == 2 || (g_sh->opt_jdam != 1 && cfg.jdam_v1);
 		if (ty == 0 && v1 && vols[6 * MAXV].ready) ty = 6;
 		if (!vols[ty * MAXV].ready) continue;
@@ -955,8 +965,8 @@ static void poll_shared()
 		I.wind[0] = cfg.wind_on ? e.wx * cfg.wind_gain : 0.f; I.wind[1] = cfg.wind_on ? e.wz * cfg.wind_gain : 0.f;
 		// destrocos com rastro de fumaca (so explosoes no chao com fragmentos)
 		{
-			static const int NT[7] = {14, 0, 5, 10, 0, 5, 14};
-			static const float VMIN[7] = {70, 0, 30, 50, 0, 25, 70}, VMAX[7] = {150, 0, 60, 110, 0, 50, 150}, SZ[7] = {1.3f, 0, 0.5f, 1.0f, 0, 0.5f, 1.3f};
+			static const int NT[8] = {14, 0, 5, 10, 0, 5, 14, 10};
+			static const float VMIN[8] = {70, 0, 30, 50, 0, 25, 70, 50}, VMAX[8] = {150, 0, 60, 110, 0, 50, 150, 110}, SZ[8] = {1.3f, 0, 0.5f, 1.0f, 0, 0.5f, 1.3f, 1.0f};
 			I.ntr = cfg.debris_on ? NT[ty] : 0; I.tr_end = 0;
 			for (int k = 0; k < I.ntr; k++)
 			{
@@ -1209,7 +1219,7 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 			{
 				I.snd = true;
 				double rr = (dx * cam.z[0] + dy * cam.z[1] + dz * cam.z[2]) / std::max(dist, 1.0);
-				if (dist < 20000) play_sound(I.type == 6 ? 0 : I.type, (float)dist, (float)std::max(-1.0, std::min(1.0, rr)));
+				if (dist < 20000) play_sound(I.type == 6 ? 0 : I.type == 7 ? 3 : I.type, (float)dist, (float)std::max(-1.0, std::min(1.0, rr)));
 			}
 		}
 		if (t < 0) continue;
@@ -1332,9 +1342,9 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 		ID3D11RenderTargetView *nrt = nullptr; G.ctx->OMSetRenderTargets(1, &nrt, nullptr);
 	}
 	// ondas de choque (depois da fumaca, para dobrar tambem a fumaca atras delas)
-	static const float WILSON[7] = {0.8f, 0.5f, 0.f, 0.35f, 0.f, 0.f, 0.8f};
-	float SHOCK_AMP[7]; for (int k = 0; k < 6; k++) SHOCK_AMP[k] = 3.0f * cfg.shock_type[k];
-	SHOCK_AMP[6] = SHOCK_AMP[0];
+	static const float WILSON[8] = {0.8f, 0.5f, 0.f, 0.35f, 0.f, 0.f, 0.8f, 0.35f};
+	float SHOCK_AMP[8]; for (int k = 0; k < 6; k++) SHOCK_AMP[k] = 3.0f * cfg.shock_type[k];
+	SHOCK_AMP[6] = SHOCK_AMP[0]; SHOCK_AMP[7] = SHOCK_AMP[3];
 	float shock_gain = g_sh->opt_shock >= 0 ? g_sh->opt_shock : cfg.shock_gain;
 	for (const Job &J : jobs)
 	{

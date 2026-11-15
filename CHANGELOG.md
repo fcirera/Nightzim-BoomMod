@@ -5,6 +5,9 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 ## Unreleased - in testing / Em teste (ainda não lançado)
 
 **English**
+- **Update check (v1.2.2):** the installer now asks GitHub on start whether a newer release exists and shows "You have the latest version" or "New version X available - download" (click opens the releases page). If it cannot reach GitHub it just says so; nothing else changes.
+- **VRAM tab uses sliders (v1.2.2):** each explosion type is now a slider (Off, 1 to 5) instead of buttons.
+- **New: "Mk-82 New Shader" (v1.2.2):** a 7th line in the VRAM tab with 6 new Mk-82 variations (faster, more violent, more chaotic start). They are drawn in the same random draw as the normal Mk-82 variations. Off by default (add-on v21). Needs the `mk82n*.nzv` files that come in the package.
 - **Fix (v1.2.1): game closing at start on some installs.** When another program in the DCS process created a tiny 64x64 test window before the game's own screen (seen on a Steam install), the add-on initialised on it and was then unloaded by ReShade while still loading the explosion volumes. The add-on now ignores screens smaller than 320x200 and stays in memory until DCS closes. Confirmed working on the developer's PC; thanks to the user who sent the logs.
 - **Fix: A-4E-C Mk-77 napalm drew two explosions.** The mod's bomb body opens about 35 m above the ground and releases the napalm itself; the hook counted the body as an air burst on top of the napalm. It now counts only the napalm.
 - **VR (OpenXR):** explosions are now drawn inside the headset, once per eye, with each eye's own off-centre projection. Confirmed on Quest 3 through Quest Link. No shock wave refraction in VR yet, and VR uses a lighter ray-march quality.
@@ -25,6 +28,9 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 - **Blender:** `nightzim_boom` add-on 0.2.0 opens the mod's `.nzv` volumes as animated OpenVDB volumes.
 
 **Português**
+- **Verificação de atualização (v1.2.2):** o instalador agora consulta o GitHub ao abrir e mostra "Você está na última versão" ou "Nova versão X disponível - baixar" (o clique abre a página de releases). Se não conseguir falar com o GitHub, apenas avisa; nada mais muda.
+- **Aba VRAM com barras deslizantes (v1.2.2):** cada tipo de explosão virou uma barra (Não, 1 a 5) no lugar dos botões.
+- **Novo: "Mk-82 Novo Shader" (v1.2.2):** 7ª linha na aba VRAM com 6 novas variações da Mk-82 (mais rápidas, mais violentas e com início mais caótico), sorteadas junto com as variações normais da Mk-82. Desligada por padrão (add-on v21). Usa os arquivos `mk82n*.nzv` que vêm no pacote.
 - **Correção (v1.2.1): jogo fechando ao abrir em algumas instalações.** Quando outro programa dentro do processo do DCS criava uma janela de teste de 64x64 antes da tela do jogo (visto numa instalação Steam), o add-on inicializava nela e depois era descarregado pelo ReShade ainda carregando os volumes das explosões. Agora o add-on ignora telas menores que 320x200 e fica na memória até o DCS fechar. Confirmado no PC do desenvolvedor; obrigado ao usuário que mandou os logs.
 - **Correção: o napalm Mk-77 do A-4E-C desenhava duas explosões.** O corpo da bomba do mod se abre a cerca de 35 m do chão e solta o napalm; o hook contava o corpo como explosão aérea além do napalm. Agora conta só o napalm.
 - **VR (OpenXR):** as explosões agora são desenhadas dentro do óculos, uma vez por olho, com a projeção descentrada de cada olho. Confirmado no Quest 3 pelo Quest Link. Ainda sem a refração da onda de choque no VR, e o VR usa uma qualidade de traçado mais leve.

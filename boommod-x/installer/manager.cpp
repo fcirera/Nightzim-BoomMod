@@ -7,6 +7,7 @@
 #define _UNICODE
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <winhttp.h>
 #include <shlobj.h>
 #include <shellapi.h>
 #include <bcrypt.h>
@@ -31,12 +32,12 @@ namespace fs = std::filesystem;
 static const wchar_t *APP = L"Nightzim BoomMod X";
 static HWND g_wnd, g_path, g_log;
 // controles desenhados por nos (botao, chave liga/desliga, seletor segmentado, aba)
-enum { W_BTN, W_TOG, W_SEG, W_TAB };
+enum { W_BTN, W_TOG, W_SEG, W_TAB, W_SLD };	// W_SLD: barra deslizante (value 0..opts.size()-1)
 struct Wd { int type = 0, page = 0, id = 0, value = 0, style = 0; Gdiplus::RectF r; std::wstring text; std::vector<std::wstring> opts; };
 static std::vector<Wd> g_w;
 static int g_cJdam, g_cCor, g_cQual, g_cDet, g_kShock, g_kWilson, g_kWind, g_kStock, g_cVar, g_kLazy, g_kBC;	// indices em g_w
-static int g_cN[6];	// variacoes por tipo de explosao (0 = desligada)
-static const wchar_t *N_FILE[6] = {L"jdam", L"aerea", L"nar", L"mk82", L"napalm", L"tank"}, *N_KEY[6] = {L"n_jdam", L"n_aerea", L"n_pequena", L"n_media", L"n_napalm", L"n_tanque"};
+static int g_cN[7];	// variacoes por tipo de explosao (0 = desligada)
+static const wchar_t *N_FILE[7] = {L"jdam", L"aerea", L"nar", L"mk82", L"napalm", L"tank", L"mk82n"}, *N_KEY[7] = {L"n_jdam", L"n_aerea", L"n_pequena", L"n_media", L"n_napalm", L"n_tanque", L"n_mk82n"};
 static int g_page = 0, g_state = 0, g_hover_part = 0;	// g_state: -1 sem DCS, 0 nao instalado, 1 ativo, 2 desativado
 static std::wstring g_vram, g_vram_big, g_vram_note; static std::vector<std::wstring> g_lines; static bool g_wnd_title_dirty = false;
 static fs::path g_exe_dir, g_payload, g_sg, g_root;	// g_root = Saved Games\DCS\Nightzim BoomMod X
@@ -221,14 +222,14 @@ static bool want_stock_replace() { return chk(g_kStock); }
 static void update_vram_label()
 {
 	if (g_w.empty()) return;
-	static const wchar_t *nome_pt[6] = {L"JDAM (2000 lb)", L"Explosão aérea", L"Foguete", L"Mk-82 (média)", L"Napalm", L"Tiro de tanque"};
-	static const wchar_t *nome_en[6] = {L"JDAM (2000 lb)", L"Air burst", L"Rocket", L"Mk-82 (medium)", L"Napalm", L"Tank gun"};
+	static const wchar_t *nome_pt[7] = {L"JDAM (2000 lb)", L"Explosão aérea", L"Foguete", L"Mk-82 (média)", L"Napalm", L"Tiro de tanque", L"Mk-82 Novo Shader"};
+	static const wchar_t *nome_en[7] = {L"JDAM (2000 lb)", L"Air burst", L"Rocket", L"Mk-82 (medium)", L"Napalm", L"Tank gun", L"Mk-82 New Shader"};
 	fs::path dir = g_payload / L"bin" / L"NightzimBoom"; std::error_code ec;
 	if (!fs::exists(dir / L"jdam.nzv", ec)) dir = dcs_path() / L"bin" / L"NightzimBoom";
 	double k = sel(g_kBC) == 2 ? 0.25 : sel(g_kBC) == 1 ? 0.5 : 1.0;
 	double ini = 0, tot = 0; int nv = 0; bool falta = false, algum_off = false;
 	auto mb = [&](const std::wstring &f) { fs::path p = dir / f; return fs::exists(p, ec) ? (double)fs::file_size(p, ec) / 1048576.0 : -1.0; };
-	for (int i = 0; i < 6; i++)
+	for (int i = 0; i < 7; i++)
 	{
 		int n = sel(g_cN[i]); double row = 0, um = mb(std::wstring(N_FILE[i]) + L".nzv");
 		for (int v = 0; v < n; v++)
@@ -238,7 +239,7 @@ static void update_vram_label()
 			row += m; nv++; if (v == 0) ini += m;
 		}
 		if (i == 0 && n > 0) { double m = mb(L"jdam_v1.nzv"); if (m > 0) { row += m; ini += m; nv++; } }	// JDAM classica acompanha a JDAM
-		if (n == 0) algum_off = true;
+		if (n == 0 && i < 6) algum_off = true;
 		tot += row;
 		wchar_t b[128];
 		if (n == 0) swprintf(b, 128, L"%ls", (g_pt ? nome_pt : nome_en)[i]);
@@ -271,7 +272,7 @@ static void load_options()
 	setchk(g_kStock, _wtoi(f(L"instalador", L"substituir", L"1").c_str()) != 0);
 	{
 		std::wstring va = f(L"vram", L"variedade", L"baixa"); int def = va == L"alta" ? 5 : va == L"media" ? 2 : 1;
-		for (int i = 0; i < 6; i++) { int n = _wtoi(f(L"vram", N_KEY[i], std::to_wstring(def).c_str()).c_str()); setsel(g_cN[i], n < 0 ? 0 : n > 5 ? 5 : n); }
+		for (int i = 0; i < 7; i++) { int n = _wtoi(f(L"vram", N_KEY[i], std::to_wstring(i == 6 ? 0 : def).c_str()).c_str()); int mx = i == 6 ? 6 : 5; setsel(g_cN[i], n < 0 ? 0 : n > mx ? mx : n); }
 	}
 	setchk(g_kLazy, _wtoi(f(L"vram", L"sob_demanda", L"1").c_str()) != 0);
 	{ int c = _wtoi(f(L"vram", L"comprimir", L"0").c_str()); setsel(g_kBC, c < 0 || c > 2 ? 0 : c); }
@@ -304,7 +305,7 @@ static void apply_options()
 	ini_set(L"shock", L"wilson", chk(g_kWilson) ? L"1.0" : L"0");
 	ini_set(L"wind", L"enabled", chk(g_kWind) ? L"1" : L"0");
 	{
-		for (int i = 0; i < 6; i++) ini_set(L"vram", N_KEY[i], std::to_wstring(sel(g_cN[i])));
+		for (int i = 0; i < 7; i++) ini_set(L"vram", N_KEY[i], std::to_wstring(sel(g_cN[i])));
 		ini_set(L"vram", L"sob_demanda", chk(g_kLazy) ? L"1" : L"0");
 		ini_set(L"vram", L"comprimir", std::to_wstring(sel(g_kBC) < 0 ? 0 : sel(g_kBC)));
 	}
@@ -435,7 +436,9 @@ static void refresh_status()
 }
 
 // ---------------------------------------------------------------- janela (interface propria, desenhada com GDI+)
-enum { ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH };
+enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH };
+static const wchar_t *APP_VER = L"1.2.2"; static const UINT WM_UPD = WM_APP + 1;
+static int g_upd = 0; static std::wstring g_latest; static int g_bUpd = -1;	// g_upd: 0 verificando, 1 em dia, 2 ha versao nova, -1 sem resposta
 static bool g_pix = false; static Gdiplus::Bitmap *g_qr = nullptr, *g_icDisc = nullptr, *g_icInsta = nullptr, *g_icPix = nullptr;	// icones fornecidos pelo autor
 static const wchar_t *PIX_KEY = L"f5124246-e867-42ce-a16b-d139017560a5";
 static const wchar_t *PAY_EMAIL = L"fcirera2007@gmail.com";
@@ -500,6 +503,7 @@ static void spaced(Graphics &g, const std::wstring &s, float x, float y, float p
 	for (wchar_t ch : s) { wchar_t t[2] = {ch, 0}; g.DrawString(t, 1, &f, PointF(x, y), &sf, &b); x += text_w(g, t, px, style) + gap; }
 }
 
+struct Wd; static void slider_track(const Wd &d, float &tx0, float &tx1);
 static void layout_children()
 {
 	auto P = [](int v) { return (int)(v * g_s + 0.5f); };
@@ -507,6 +511,73 @@ static void layout_children()
 	MoveWindow(g_log, P(X0), P(84), P(X1 - X0), P(CH - 84 - 56), TRUE);
 	ShowWindow(g_path, g_page == 0 ? SW_SHOW : SW_HIDE);
 	ShowWindow(g_log, g_page == 2 ? SW_SHOW : SW_HIDE);
+}
+
+
+// consulta o GitHub (releases/latest; se nao houver release, a tag mais nova) e compara com a versao deste instalador
+static std::string http_get(const wchar_t *path)
+{
+	std::string out; HINTERNET ses = WinHttpOpen(L"NightzimBoomModX-Installer", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, nullptr, nullptr, 0);
+	if (!ses) return out;
+	WinHttpSetTimeouts(ses, 5000, 5000, 6000, 8000);
+	if (HINTERNET con = WinHttpConnect(ses, L"api.github.com", INTERNET_DEFAULT_HTTPS_PORT, 0))
+	{
+		if (HINTERNET rq = WinHttpOpenRequest(con, L"GET", path, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE))
+		{
+			if (WinHttpSendRequest(rq, L"Accept: application/vnd.github+json\r\n", (DWORD)-1, nullptr, 0, 0, 0) && WinHttpReceiveResponse(rq, nullptr))
+			{
+				DWORD code = 0, sz = sizeof code; WinHttpQueryHeaders(rq, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &code, &sz, nullptr);
+				if (code == 200) { DWORD n; char b[4096]; while (WinHttpReadData(rq, b, sizeof b, &n) && n) out.append(b, n); }
+			}
+			WinHttpCloseHandle(rq);
+		}
+		WinHttpCloseHandle(con);
+	}
+	WinHttpCloseHandle(ses); return out;
+}
+static std::vector<int> ver_parts(const std::string &v)
+{
+	std::vector<int> p; int cur = 0; bool any = false;
+	for (char c : v) { if (c >= '0' && c <= '9') { cur = cur * 10 + (c - '0'); any = true; } else if (c == '.') { p.push_back(cur); cur = 0; any = false; } else if (any || !p.empty()) break; }
+	if (any) p.push_back(cur); return p;
+}
+static bool ver_newer(const std::string &a, const std::string &b)	// a > b ?
+{
+	auto x = ver_parts(a), y = ver_parts(b); size_t n = std::max(x.size(), y.size()); x.resize(n); y.resize(n);
+	for (size_t i = 0; i < n; i++) if (x[i] != y[i]) return x[i] > y[i];
+	return false;
+}
+static DWORD WINAPI update_thread(LPVOID)
+{
+	std::string tag, j = http_get(L"/repos/fcirera/Nightzim-BoomMod/releases/latest");
+	auto grab = [](const std::string &js, const char *key) { size_t k = js.find(key); if (k == std::string::npos) return std::string(); k = js.find('"', k + strlen(key)); if (k == std::string::npos) return std::string(); size_t e = js.find('"', k + 1); return e == std::string::npos ? std::string() : js.substr(k + 1, e - k - 1); };
+	tag = grab(j, "\"tag_name\":");
+	if (tag.empty())
+	{	// sem release publicada: usa a maior tag
+		std::string t = http_get(L"/repos/fcirera/Nightzim-BoomMod/tags?per_page=30"); size_t pos = 0;
+		while ((pos = t.find("\"name\":", pos)) != std::string::npos)
+		{
+			std::string n = grab(t.substr(pos), "\"name\":"); pos += 8;
+			if (!ver_parts(n).empty() && (tag.empty() || ver_newer(n, tag))) tag = n;
+		}
+	}
+	int res = -1;
+	if (!tag.empty())
+	{
+		std::string mine(APP_VER, APP_VER + wcslen(APP_VER));
+		res = ver_newer(tag, mine) ? 2 : 1; g_latest.assign(tag.begin(), tag.end());
+		if (!g_latest.empty() && (g_latest[0] == L'v' || g_latest[0] == L'V')) g_latest.erase(0, 1);
+	}
+	g_upd = res; if (g_wnd) PostMessageW(g_wnd, WM_UPD, 0, 0);
+	return 0;
+}
+static void upd_text()
+{
+	if (g_bUpd < 0 || g_bUpd >= (int)g_w.size()) return;
+	g_w[g_bUpd].text = g_upd == 2 ? std::wstring(T(L"Nova versão ", L"New version ")) + g_latest + T(L" disponível - baixar", L" available - download")
+		: g_upd == 1 ? std::wstring(T(L"Você está na última versão", L"You have the latest version"))
+		: g_upd == -1 ? std::wstring(T(L"Não deu para verificar atualizações", L"Could not check for updates"))
+		: std::wstring(T(L"Verificando atualizações...", L"Checking for updates..."));
 }
 
 static void build_ui()
@@ -529,12 +600,16 @@ static void build_ui()
 	g_kWind = add(W_TOG, 1, 0, X0, y, W / 2 - 8, 30, T(L"Fumaça deriva com o vento", L"Smoke drifts with the wind"));
 	g_kStock = add(W_TOG, 1, 0, X0 + W / 2 + 8, y, W / 2 - 8, 30, T(L"Substituir explosões do jogo", L"Replace stock explosions")); y += 70;
 	g_cVar = add(W_SEG, 9, ID_VRAM, X0, y, W, 34, L"", {L"", L"", L""});	// (antigo seletor global; fora de uso)
-	g_kBC = add(W_SEG, 3, ID_VRAM, X0, 346, W, 34, T(L"Compressão", L"Compression"), {T(L"Desligada", L"Off"), T(L"Metade", L"Half"), T(L"Um quarto (BC7)", L"One quarter (BC7)")});
-	g_kLazy = add(W_TOG, 3, ID_VRAM, X0, 390, W, 30, T(L"Carregar variações extras só quando usadas", L"Load extra variations only when used"));
-	for (int i = 0; i < 6; i++) g_cN[i] = add(W_SEG, 3, ID_VRAM, X0, 104.f + 38 * i, W, 32, L"", {T(L"Não", L"Off"), L"1", L"2", L"3", L"4", L"5"});
+	g_kBC = add(W_SEG, 3, ID_VRAM, X0, 352, W, 34, T(L"Compressão", L"Compression"), {T(L"Desligada", L"Off"), T(L"Metade", L"Half"), T(L"Um quarto (BC7)", L"One quarter (BC7)")});
+	g_kLazy = add(W_TOG, 3, ID_VRAM, X0, 394, W, 30, T(L"Carregar variações extras só quando usadas", L"Load extra variations only when used"));
+	for (int i = 0; i < 7; i++)
+	{	// barra deslizante: Não, 1..5 (Mk-82 Novo Shader: Não, 1..6 = variantes 1, 2, 3, 4, 7 e 8 da rodada de testes)
+		g_cN[i] = add(W_SLD, 3, ID_VRAM, X0, 104.f + 34 * i, W, 30, L"", {T(L"Não", L"Off"), L"1", L"2", L"3", L"4", L"5"});
+		if (i == 6) g_w[g_cN[i]].opts.push_back(L"6");
+	}
 	(void)LBL;
 	if (had) for (int i = 0; i < keep_n && i < (int)g_w.size(); i++) g_w[i].value = keep_sel[i];
-	else for (int i = 0; i < 6; i++) g_w[g_cN[i]].value = 1;
+	else for (int i = 0; i < 6; i++) g_w[g_cN[i]].value = 1;	// (a Mk-82 Novo Shader comeca em 0)
 	add(W_BTN, 1, ID_APPLY, X1 - 200, CH - 62, 200, 42, T(L"APLICAR OPÇÕES", L"APPLY OPTIONS"), {}, 1);
 	add(W_BTN, 3, ID_APPLY, X1 - 200, CH - 62, 200, 42, T(L"APLICAR OPÇÕES", L"APPLY OPTIONS"), {}, 1);
 	// --- abas e idioma (todas as paginas)
@@ -546,6 +621,8 @@ static void build_ui()
 	add(W_BTN, -1, ID_PIX, 238, CH - 100.f, 132, 46, L"Pix", {}, 6);
 	add(W_BTN, -1, ID_DISC, X1 - 52 - 10 - 46 - 8 - 22 - 8 - 22, 28, 22, 28, L"", {}, 5);
 	add(W_BTN, -1, ID_INSTA, X1 - 52 - 10 - 46 - 8 - 22, 28, 22, 28, L"", {}, 5);
+	g_bUpd = add(W_BTN, -1, ID_UPD, 94, CH - 40.f, 290, 22, L"", {}, 5);
+	upd_text();
 	add(W_BTN, -1, ID_GH, X1 - 52 - 10 - 46, 28, 46, 28, L"GitHub", {}, 5);
 	add(W_BTN, -1, ID_LANG, X1 - 52, 28, 52, 28, g_pt ? L"PT | en" : L"pt | EN", {}, 3);
 	// --- instalacao
@@ -590,8 +667,7 @@ static void render(Bitmap &back)
 		fill_rr(g, RectF(30, yb + 72, 46, 4), 2, C_ACC);
 		text(g, T(L"Explosões volumétricas simuladas\npara o DCS World", L"Simulated volumetric explosions\nfor DCS World"), RectF(30, yb + 88, 350, 48), 16, Color(235, 232, 234, 237), 0, FontStyleRegular, L"Segoe UI", true);
 		fill_rr(g, RectF(30, CH - 40.f, 54, 22), 11, Color(70, 255, 255, 255));
-		text(g, L"v1.2.1", RectF(30, CH - 40.f, 70, 22), 12, Color(255, 255, 255, 255), 1, FontStyleBold);
-		text(g, T(L"Capturas feitas no jogo", L"Captured in game"), RectF(94, CH - 40.f, 260, 22), 11.5f, Color(170, 232, 234, 237));
+		text(g, L"v1.2.2", RectF(30, CH - 40.f, 70, 22), 12, Color(255, 255, 255, 255), 1, FontStyleBold);
 	}
 	// ---- abas
 	{
@@ -671,7 +747,7 @@ static void render(Bitmap &back)
 			{
 				Bitmap *ic = d.id == ID_DISC ? g_icDisc : d.id == ID_INSTA ? g_icInsta : nullptr; RectF tr = d.r;
 				if (ic) { g.DrawImage(ic, RectF(d.r.X + 1, d.r.Y + 4, 20, 20)); tr.X += 22; tr.Width -= 22; }
-				text(g, d.text, tr, 12, hov ? C_ACC2 : Color(255, 170, 177, 187), ic ? 0 : 1, FontStyleRegular); if (hov) { Pen u(C_ACC2, 1); g.DrawLine(&u, tr.X + 2, d.r.Y + 23, d.r.X + d.r.Width - 2, d.r.Y + 23); }
+				text(g, d.text, tr, 12, d.id == ID_UPD && g_upd == 2 ? C_ACC2 : hov ? C_ACC2 : Color(255, 170, 177, 187), (ic || d.id == ID_UPD) ? 0 : 1, d.id == ID_UPD && g_upd == 2 ? FontStyleBold : FontStyleRegular); if (hov) { Pen u(C_ACC2, 1); g.DrawLine(&u, tr.X + 2, d.r.Y + 23, d.r.X + d.r.Width - 2, d.r.Y + 23); }
 			}
 			else if (d.style == 6)	// Pix: abre o QR Code
 			{
@@ -706,6 +782,20 @@ static void render(Bitmap &back)
 			fill_rr(g, sw, 10, d.value ? C_ACC : Color(255, 58, 63, 73));
 			SolidBrush kn(Color(255, 255, 255, 255)); g.FillEllipse(&kn, d.value ? sw.X + 20.f : sw.X + 2.f, sw.Y + 2.f, 16.f, 16.f);
 			text(g, d.text, RectF(d.r.X + 50, d.r.Y, d.r.Width - 50, d.r.Height), 13.5f, hov ? Color(255, 255, 255, 255) : C_TXT);
+		}
+		else if (d.type == W_SLD)
+		{
+			const float LB = 176;
+			text(g, d.text, RectF(d.r.X, d.r.Y, LB, d.r.Height), 13.5f, d.value ? C_TXT : C_MUT);
+			RectF box(d.r.X + LB, d.r.Y, d.r.Width - LB, d.r.Height); fill_rr(g, box, 9, C_CARD);
+			float tx0, tx1; slider_track(d, tx0, tx1); int mx = (int)d.opts.size() - 1; float cy = box.Y + box.Height / 2;
+			fill_rr(g, RectF(tx0, cy - 2, tx1 - tx0, 4), 2, Color(255, 58, 63, 73));
+			float kx = tx0 + (tx1 - tx0) * d.value / mx;
+			if (d.value > 0) fill_rr(g, RectF(tx0, cy - 2, kx - tx0, 4), 2, C_ACC);
+			for (int k = 0; k <= mx; k++) { SolidBrush tb(k <= d.value ? C_ACC : Color(255, 84, 90, 101)); float px = tx0 + (tx1 - tx0) * k / mx; g.FillEllipse(&tb, px - 2.5f, cy - 2.5f, 5.f, 5.f); }
+			SolidBrush kn(Color(255, 255, 255, 255)); float kr = (dn || hov) ? 8.f : 7.f; g.FillEllipse(&kn, kx - kr, cy - kr, 2 * kr, 2 * kr);
+			Pen kp(C_ACC, 2.f); g.DrawEllipse(&kp, kx - kr, cy - kr, 2 * kr, 2 * kr);
+			text(g, d.opts[d.value], RectF(tx1 + 14, box.Y, box.X + box.Width - tx1 - 18, box.Height), 13, d.value ? C_ACC2 : C_MUT, 1, FontStyleBold);
 		}
 		else if (d.type == W_SEG)
 		{
@@ -760,6 +850,12 @@ static void save_shots(const std::wstring &prefix)
 	{ g_page = 0; g_pix = true; Bitmap b((INT)(CW * g_s), (INT)(CH * g_s), PixelFormat32bppPARGB); render(b); b.Save((prefix + L"4" + (g_pt ? L"_pt.png" : L"_en.png")).c_str(), &png, nullptr); }
 }
 
+static void slider_track(const Wd &d, float &tx0, float &tx1) { tx0 = d.r.X + 176 + 18; tx1 = d.r.X + d.r.Width - 62; }
+static int slider_val(const Wd &d, float x)
+{
+	float a, b; slider_track(d, a, b); int mx = (int)d.opts.size() - 1;
+	int v = (int)floorf((x - a) / (b - a) * mx + 0.5f); return v < 0 ? 0 : v > mx ? mx : v;
+}
 static int hit(float x, float y, int *part = nullptr)
 {
 	for (int i = (int)g_w.size() - 1; i >= 0; i--)
@@ -767,7 +863,7 @@ static int hit(float x, float y, int *part = nullptr)
 		Wd &d = g_w[i];
 		if (d.page >= 0 && d.page != g_page) continue;
 		RectF r = d.r;
-		if (d.type == W_SEG) { r.X += 176; r.Width -= 176; }
+		if (d.type == W_SEG || d.type == W_SLD) { r.X += 176; r.Width -= 176; }
 		if (d.type == W_TAB) { r.Y = 20; r.Height = 44; }
 		if (x < r.X || y < r.Y || x >= r.X + r.Width || y >= r.Y + r.Height) continue;
 		if (part) *part = d.type == W_SEG ? std::min((int)d.opts.size() - 1, (int)((x - r.X) / (r.Width / d.opts.size()))) : 0;
@@ -794,6 +890,7 @@ static void command(int id)
 	case ID_PIX: g_pix = true; ShowWindow(g_path, SW_HIDE); ShowWindow(g_log, SW_HIDE); break;
 	case ID_DISC: ShellExecuteW(h, L"open", L"https://discord.gg/3zD4XBPwK", nullptr, nullptr, SW_SHOW); break;
 	case ID_INSTA: ShellExecuteW(h, L"open", L"https://www.instagram.com/sireiras/", nullptr, nullptr, SW_SHOW); break;
+	case ID_UPD: if (g_upd == 2) ShellExecuteW(h, L"open", L"https://github.com/fcirera/Nightzim-BoomMod/releases/latest", nullptr, nullptr, SW_SHOW); break;
 	case ID_GH: ShellExecuteW(h, L"open", L"https://github.com/fcirera/Nightzim-BoomMod", nullptr, nullptr, SW_SHOW); break;
 	case ID_LANG: g_pt = !g_pt; build_ui(); refresh_status(); update_vram_label(); break;
 	case ID_BROWSE: if (!g_busy) browse(); break;
@@ -815,11 +912,17 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 	switch (m)
 	{
 	case WM_ERASEBKGND: return 1;
+	case WM_UPD: upd_text(); InvalidateRect(h, nullptr, FALSE); return 0;
 	case WM_TIMER: KillTimer(h, 1); InvalidateRect(h, nullptr, FALSE); return 0;
 	case WM_PAINT: { PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); paint(dc); EndPaint(h, &ps); return 0; }
 	case WM_MOUSEMOVE:
 	{
 		int part = 0, i = hit(GET_X_LPARAM(l) / g_s, GET_Y_LPARAM(l) / g_s, &part);
+		if ((w & MK_LBUTTON) && g_down >= 0 && g_w[g_down].type == W_SLD && !g_busy)
+		{	// arrastando a barra: acompanha o mouse mesmo fora dela
+			int nv = slider_val(g_w[g_down], GET_X_LPARAM(l) / g_s);
+			if (nv != g_w[g_down].value) { g_w[g_down].value = nv; if (g_w[g_down].id) command(g_w[g_down].id); InvalidateRect(h, nullptr, FALSE); }
+		}
 		if (i != g_hover || part != g_hover_part) { g_hover = i; g_hover_part = part; InvalidateRect(h, nullptr, FALSE); }
 		TRACKMOUSEEVENT t = {sizeof t, TME_LEAVE, h, 0}; TrackMouseEvent(&t);
 		SetCursor(LoadCursor(nullptr, i >= 0 ? IDC_HAND : IDC_ARROW));
@@ -827,7 +930,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 	}
 	case WM_SETCURSOR: if (LOWORD(l) == HTCLIENT && (HWND)w == h) return TRUE; break;
 	case WM_MOUSELEAVE: if (g_hover != -1) { g_hover = -1; InvalidateRect(h, nullptr, FALSE); } return 0;
-	case WM_LBUTTONDOWN: if (g_pix) { g_pix = false; g_down = -1; layout_children(); InvalidateRect(h, nullptr, FALSE); return 0; } g_down = hit(GET_X_LPARAM(l) / g_s, GET_Y_LPARAM(l) / g_s); SetCapture(h); SetFocus(h); InvalidateRect(h, nullptr, FALSE); return 0;
+	case WM_LBUTTONDOWN: if (g_pix) { g_pix = false; g_down = -1; layout_children(); InvalidateRect(h, nullptr, FALSE); return 0; } g_down = hit(GET_X_LPARAM(l) / g_s, GET_Y_LPARAM(l) / g_s); if (g_down >= 0 && g_w[g_down].type == W_SLD && !g_busy) { g_w[g_down].value = slider_val(g_w[g_down], GET_X_LPARAM(l) / g_s); if (g_w[g_down].id) command(g_w[g_down].id); } SetCapture(h); SetFocus(h); InvalidateRect(h, nullptr, FALSE); return 0;
 	case WM_LBUTTONUP:
 	{
 		ReleaseCapture();
@@ -902,6 +1005,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int)
 		if (k != std::wstring::npos) { std::wstring pf = cl.substr(k + 6); while (!pf.empty() && (pf.back() == L' ' || pf.back() == L'"')) pf.pop_back(); save_shots(pf); return 0; }
 	}
 	ShowWindow(g_wnd, SW_SHOW);
+	CloseHandle(CreateThread(nullptr, 0, update_thread, nullptr, 0, nullptr));	// verifica no GitHub se ha versao mais nova
 	MSG msg; while (GetMessageW(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
 	GdiplusShutdown(gtok);
 	return 0;
