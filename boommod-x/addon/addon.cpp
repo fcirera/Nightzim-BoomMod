@@ -46,13 +46,13 @@ struct Config
 	float dist[6] = {600, 600, 200, 400, 400, 150};
 	float shock_gain = 1.f, wilson_gain = 1.f, volume = 0.f;
 	float shock_type[6] = {0.8f, 0.1f, 0.13f, 0.3f, 0.f, 0.1f};	// fracao da onda de choque de referencia (3 m de refracao)
-	int dev = 0; int jdam_v1 = 0;
+	int dev = 0; int jdam_v1 = 0; int jdam_nuke = 0; int max_inst = 30;
 	int debris_on = 0; float realism = 1.f, firelight = 1.6f; float debris_density = 1.f, debris_glow = 1.f;
 	int wind_on = 1; float wind_gain = 1.f, wind_shear_m = 80.f, wind_delay_s = 0.6f;
 	float detail = 0.8f, detail_scale = 12.f, fire_gain = 0.6f, flame_min_t = 1450.f, edge_fade = 0.08f;
 	float fog_dist = 15000.f, fog_r = 0.62f, fog_g = 0.68f, fog_b = 0.76f, hold_s = 24.f, fade_end = 40.f, freeze_t = -1.f;
 	float night_ambient = 0.02f, night_fire = 1.5f, night_glow = 2.0f;	// noite: luz ambiente minima, ganho do fogo e da luz do fogo na fumaca
-	int vram_n[8] = {-1, -1, -1, -1, -1, -1, -1, 0};	// variacoes por tipo escolhidas no instalador (0 = tipo desligado; -1 = usar vram_var)
+	int vram_n[10] = {-1, -1, -1, -1, -1, -1, -1, 0, 0, 0};	// variacoes por tipo escolhidas no instalador (0 = tipo desligado; -1 = usar vram_var)
 	int vram_var = 2, vram_lazy = 1, vram_bc = 0;	// variacoes por tipo na VRAM, carregar so quando usar, comprimir (0 nao, 1 = metade/BC5, 2 = um quarto/BC7)
 	int vr_on = 1, vr_swap = 0, vr_log = 1; float vr_steps = 0.6f, vr_step_scale = 1.5f;	// VR: desenhar em cada olho; qualidade reduzida
 	int pod_on = 1, pod_min_draws = 40, pod_log = 1; float pod_max_fov = 12.f;	// pod: campo estreito (NFOV ~1,3 graus, WFOV ~4,5)
@@ -94,7 +94,8 @@ static void load_config()
 	{ const char *k[6] = {"jdam", "aerea", "pequena", "media", "napalm", "tanque"}; for (int i = 0; i < 6; i++) c.shock_type[i] = ini_f("shock", k[i], c.shock_type[i]); } c.wilson_gain = ini_f("shock", "wilson", c.wilson_gain);
 	c.volume = ini_f("sound", "volume", c.volume);
 	c.dev = (int)ini_f("nightzim", "dev", 0.f);
-	{ char b[16]; GetPrivateProfileStringA("instalador", "jdam", "v2", b, sizeof b, (g_dir + "NightzimBoom.ini").c_str()); c.jdam_v1 = !_stricmp(b, "v1"); }
+	c.max_inst = std::max(0, std::min(50, (int)ini_f("explosion", "max_simultaneas", 30.f)));
+	{ char b[16]; GetPrivateProfileStringA("instalador", "jdam", "v2", b, sizeof b, (g_dir + "NightzimBoom.ini").c_str()); c.jdam_v1 = !_stricmp(b, "v1"); c.jdam_nuke = !_stricmp(b, "nuke"); }
 	c.debris_on = (int)ini_f("debris", "enabled", (float)c.debris_on);
 	c.realism = ini_f("color", "realism", c.realism); c.firelight = ini_f("color", "firelight", c.firelight);
 	c.debris_density = ini_f("debris", "smoke", c.debris_density); c.debris_glow = ini_f("debris", "glow", c.debris_glow);
@@ -103,8 +104,10 @@ static void load_config()
 	{
 		char b2[16]; GetPrivateProfileStringA("vram", "variedade", "media", b2, sizeof b2, (g_dir + "NightzimBoom.ini").c_str());
 		c.vram_var = !_stricmp(b2, "alta") ? 5 : !_stricmp(b2, "media") ? 2 : (atoi(b2) > 0 ? std::min(5, atoi(b2)) : 1);
-		{ const char *k[6] = {"n_jdam", "n_aerea", "n_pequena", "n_media", "n_napalm", "n_tanque"}; for (int i = 0; i < 6; i++) c.vram_n[i] = std::max(-1, std::min(5, (int)ini_f("vram", k[i], -1.f))); }
-		c.vram_n[7] = std::max(0, std::min(6, (int)ini_f("vram", "n_mk82n", 0.f)));	// Mk-82 Novo Shader: 0 = nenhuma (padrao), ate 6 variantes (1,2,3,4,7,8 da rodada) que entram no sorteio da Mk-82
+		{ const char *k[6] = {"n_jdam", "n_aerea", "n_pequena", "n_media", "n_napalm", "n_tanque"}; for (int i = 0; i < 6; i++) c.vram_n[i] = std::max(-1, std::min(5, (int)ini_f("vram", k[i], (i == 2 || i == 3) ? 0.f : -1.f))); }
+		c.vram_n[7] = std::max(0, std::min(6, (int)ini_f("vram", "n_mk82n", 6.f)));	// Mk-82 Novo Shader: 0 = nenhuma, padrao 6 (todas), ate 6 variantes (1,2,3,4,7,8 da rodada) que entram no sorteio da Mk-82
+		c.vram_n[8] = std::max(0, std::min(4, (int)ini_f("vram", "n_narn", 4.f)));	// Foguete Novo Shader: 0 = nenhum (padrao), ate 4 variantes (1..4) que entram no sorteio do foguete
+		c.vram_n[9] = c.jdam_nuke ? 1 : 0;	// bomba nuclear no lugar da JDAM: so carrega (1 GB) quando escolhida no instalador
 		c.vram_n[6] = c.vram_n[0] == 0 ? 0 : 1;	// JDAM classica: acompanha a JDAM, sempre uma so
 		c.vram_lazy = (int)ini_f("vram", "sob_demanda", (float)c.vram_lazy); c.vram_bc = (int)ini_f("vram", "comprimir", (float)c.vram_bc);
 	}
@@ -153,10 +156,10 @@ static bool read_cam(Cam &c)
 }
 
 // ---------------------------------------------------------------- volume .nzv
-static const int NTYPES = 8;	// 6 = JDAM classica (v1), usada no lugar da 0 quando escolhida; 7 = Mk-82 Novo Shader (entra no sorteio da 3)
-static const char *TYPE_FILE[NTYPES] = {"jdam.nzv", "aerea.nzv", "nar.nzv", "mk82.nzv", "napalm.nzv", "tank.nzv", "jdam_v1.nzv", "mk82n.nzv"};
-static const char *TYPE_NAME[NTYPES] = {"JDAM", "aerea", "pequena", "media", "napalm", "tanque", "JDAM classica", "media novo shader"};
-static const bool TYPE_GROUND[NTYPES] = {true, false, true, true, true, true, true, true};
+static const int NTYPES = 10;	// 6 = JDAM classica (v1), usada no lugar da 0 quando escolhida; 7 = Mk-82 Novo Shader (entra no sorteio da 3)
+static const char *TYPE_FILE[NTYPES] = {"jdam.nzv", "aerea.nzv", "nar.nzv", "mk82.nzv", "napalm.nzv", "tank.nzv", "jdam_v1.nzv", "mk82n.nzv", "narn.nzv", "nuke.nzv"};
+static const char *TYPE_NAME[NTYPES] = {"JDAM", "aerea", "pequena", "media", "napalm", "tanque", "JDAM classica", "media novo shader", "pequena novo shader", "nuclear"};
+static const bool TYPE_GROUND[NTYPES] = {true, false, true, true, true, true, true, true, true, true};
 static const int MAXV = 6;	// variacoes por tipo: jdam.nzv, jdam_2.nzv ... (ate 5; o Mk-82 Novo Shader vai ate 6)
 
 struct Volume
@@ -292,9 +295,12 @@ static DWORD WINAPI loader_thread(LPVOID p)
 {
 	ID3D11Device *dev = (ID3D11Device *)p;
 	// quais variacoes existem (limitadas pela opcao "variedade" do instalador)
+	// rede de seguranca: se o Novo Shader esta escolhido mas o arquivo nao esta na pasta, a explosao antiga volta a valer
+	if (cfg.vram_n[2] == 0 && GetFileAttributesA((g_dir + vol_file(8, 0)).c_str()) == INVALID_FILE_ATTRIBUTES) { cfg.vram_n[2] = -1; logf("aviso: narn.nzv ausente, foguete antigo reativado"); }
+	if (cfg.vram_n[3] == 0 && GetFileAttributesA((g_dir + vol_file(7, 0)).c_str()) == INVALID_FILE_ATTRIBUTES) { cfg.vram_n[3] = -1; logf("aviso: mk82n.nzv ausente, Mk-82 antiga reativada"); }
 	for (int k = 0; k < NTYPES; k++)
 	{
-		int n = 0, lim = cfg.vram_n[k] >= 0 ? cfg.vram_n[k] : cfg.vram_var; if (k != 7) lim = std::min(lim, 5);
+		int n = 0, lim = cfg.vram_n[k] >= 0 ? cfg.vram_n[k] : cfg.vram_var; if (k != 7 && k != 8) lim = std::min(lim, 5); if (k == 9) lim = std::min(lim, 1); if (k == 8) lim = std::min(lim, 4);
 		for (int v = 0; v < MAXV && n < lim; v++) { DWORD a = GetFileAttributesA((g_dir + vol_file(k, v)).c_str()); if (a == INVALID_FILE_ATTRIBUTES) break; vols[k * MAXV + v].exists = true; n++; }
 		g_nvar[k] = n;
 	}
@@ -302,7 +308,7 @@ static DWORD WINAPI loader_thread(LPVOID p)
 	for (int k = 0; k < NTYPES; k++) if (g_nvar[k] > 0) load_volume(dev, k, 0); else if (cfg.vram_n[k] == 0) logf("explosao %s desligada no instalador (nao carregada)", TYPE_NAME[k]);
 	if (!cfg.vram_lazy)
 		for (int k = 0; k < NTYPES; k++) for (int v = 1; v < g_nvar[k]; v++) load_volume(dev, k, v);
-	logf("variacoes por tipo: jdam %d, aerea %d, pequena %d, media %d, napalm %d, tanque %d, mk82 novo shader %d (padrao %d); %s, %s", g_nvar[0], g_nvar[1], g_nvar[2], g_nvar[3], g_nvar[4], g_nvar[5], g_nvar[7], cfg.vram_var, cfg.vram_lazy ? "extras carregam quando sorteadas" : "todas na abertura", cfg.vram_bc == 2 ? "comprimidas a 1/4 (BC7)" : cfg.vram_bc ? "comprimidas a 1/2 (BC5)" : "sem compressao");
+	logf("variacoes por tipo: jdam %d, aerea %d, pequena %d, media %d, napalm %d, tanque %d, mk82 novo shader %d, pequena novo shader %d, nuclear %d (padrao %d); %s, %s", g_nvar[0], g_nvar[1], g_nvar[2], g_nvar[3], g_nvar[4], g_nvar[5], g_nvar[7], g_nvar[8], g_nvar[9], cfg.vram_var, cfg.vram_lazy ? "extras carregam quando sorteadas" : "todas na abertura", cfg.vram_bc == 2 ? "comprimidas a 1/4 (BC7)" : cfg.vram_bc ? "comprimidas a 1/2 (BC5)" : "sem compressao");
 	dev->Release();
 	return 0;
 }
@@ -859,7 +865,7 @@ static void on_destroy_device(device *dev)
 struct Inst { bool on = false; int type = 0, var = 0; double p[3] = {}; double t0 = 0; float yaw = 0, rate = 1, wind[2] = {}; bool mirror = false, real = false, snd = false;
 	int ntr = 0; float tv[16][4] = {}, tp[16][4] = {}; float tr_end = 0;
 	ID3D11Texture3D *trt = nullptr; ID3D11UnorderedAccessView *truav = nullptr; ID3D11ShaderResourceView *trsrv = nullptr; ID3D11Texture3D *sun = nullptr; ID3D11UnorderedAccessView *uav = nullptr; ID3D11ShaderResourceView *srv = nullptr; int sx = 0, sy = 0, sz = 0; };
-static const int MAXI = 12;
+static const int MAXI = 50;	// explosoes simultaneas (era 12)
 static Inst g_inst[MAXI];
 static bool g_have_spawn = false;	// alguma explosao ativa
 static LONG g_spawn_seq_seen = -1, g_clear_seq_seen = -1, g_calib_seq_seen = 0, g_sun_seq_seen = 0;
@@ -886,7 +892,8 @@ static bool we_are_foreground()
 
 static void request_spawn(int type)
 {
-	if (!vols[type * MAXV].ready) { logf("explosao %s ainda carregando ou ausente", TYPE_NAME[type]); return; }
+	bool pronto = vols[type * MAXV].ready || (type == 3 && vols[7 * MAXV].ready) || (type == 2 && vols[8 * MAXV].ready);	// o Novo Shader atende o atalho da Mk-82 / foguete
+	if (!pronto) { logf("explosao %s ainda carregando ou ausente", TYPE_NAME[type]); return; }
 	g_sh->spawn_distance = cfg.dist[type]; g_sh->spawn_req_type = type;
 	MemoryBarrier();
 	InterlockedIncrement(&g_sh->spawn_req);
@@ -902,7 +909,14 @@ static void handle_keys()
 	const int NK = sizeof keys / sizeof keys[0];
 	bool e[NK]; for (int k = 0; k < NK; k++) e[k] = key_edge(keys[k]) && mod;
 	int tmap[6] = {0, 1, 2, 3, 4, 5};
-	for (int k = 0; k < 6; k++) if (e[k]) request_spawn(tmap[k]);
+	for (int k = 0; k < 6; k++) if (e[k] && k != 1) request_spawn(tmap[k]);
+	if (e[1])	// Ctrl+Shift+Z: em vez da explosao aerea, pede um AIM-120 (o hook cria o lancamento na missao de teste)
+	{
+		g_sh->spawn_distance = 0.f; g_sh->spawn_req_type = 9;
+		MemoryBarrier();
+		InterlockedIncrement(&g_sh->spawn_req);
+		logf("pedido de missil AIM-120 (Ctrl+Shift+Z)");
+	}
 	if (e[6]) { g_probe_force = true; g_probe_wait = 0; logf("calibracao pedida"); }
 	if (e[7]) { cfg.debug = (cfg.debug + 1) % 3; logf("depuracao %d", cfg.debug); }
 	if (e[8]) { float tv = g_tanv, nr = g_near; load_config(); g_tanv = tv; g_near = nr; build_shaders(); }
@@ -928,18 +942,21 @@ static void poll_shared()
 	{
 		auto &e = g_sh->ring[g_spawn_seq_seen % NZ_RING];
 		bool novo = e.type == 3 && g_nvar[7] > 0 && vols[7 * MAXV].ready;	// Mk-82 Novo Shader disponivel
-		if (e.type >= 0 && e.type < 6 && cfg.vram_n[e.type] == 0 && !novo) continue;	// tipo desligado pelo usuario: sem explosao
+		bool novoN = e.type == 2 && g_nvar[8] > 0 && vols[8 * MAXV].ready;	// Foguete Novo Shader disponivel
+		if (e.type >= 0 && e.type < 6 && cfg.vram_n[e.type] == 0 && !novo && !novoN) continue;	// tipo desligado pelo usuario: sem explosao
 		int ty = (e.type >= 0 && e.type < 6 && vols[e.type * MAXV].ready) ? e.type : 0;
-		if (novo)
+		if (novo || novoN)
 		{
-			// Mk-82: cada variacao (antiga ou nova) tem a mesma chance de sair
+			// Mk-82 / foguete: cada variacao (antiga ou nova) tem a mesma chance de sair
 			static uint32_t rm = GetTickCount() * 3266489917u;
 			rm ^= rm << 13; rm ^= rm >> 17; rm ^= rm << 5;
-			int n3 = (cfg.vram_n[3] != 0 && vols[3 * MAXV].ready) ? g_nvar[3] : 0;
-			ty = (int)(rm % (uint32_t)(n3 + g_nvar[7])) < g_nvar[7] ? 7 : 3;
+			int bt = novo ? 3 : 2, nt = novo ? 7 : 8;
+			int n3 = (cfg.vram_n[bt] != 0 && vols[bt * MAXV].ready) ? g_nvar[bt] : 0;
+			ty = (int)(rm % (uint32_t)(n3 + g_nvar[nt])) < g_nvar[nt] ? nt : bt;
 		}
 		bool v1 = g_sh->opt_jdam == 2 || (g_sh->opt_jdam != 1 && cfg.jdam_v1);
-		if (ty == 0 && v1 && vols[6 * MAXV].ready) ty = 6;
+		if (ty == 0 && cfg.jdam_nuke && vols[9 * MAXV].ready) ty = 9;	// opcao do instalador: bomba nuclear no lugar da JDAM
+		else if (ty == 0 && v1 && vols[6 * MAXV].ready) ty = 6;
 		if (!vols[ty * MAXV].ready) continue;
 		// variacao sorteada; se ainda nao esta na VRAM, carrega em segundo plano e esta usa a primeira
 		int var = 0;
@@ -954,7 +971,8 @@ static void poll_shared()
 		}
 		// vaga livre ou a mais antiga
 		int k = 0; double oldest = 1e300;
-		for (int i = 0; i < MAXI; i++) { if (!g_inst[i].on) { k = i; break; } if (g_inst[i].t0 < oldest) { oldest = g_inst[i].t0; k = i; } }
+		if (cfg.max_inst <= 0) continue;	// limite 0: nenhuma explosao
+		for (int i = 0; i < cfg.max_inst; i++) { if (!g_inst[i].on) { k = i; break; } if (g_inst[i].t0 < oldest) { oldest = g_inst[i].t0; k = i; } }
 		Inst &I = g_inst[k];
 		I.on = true; I.type = ty; I.var = var; memcpy(I.p, e.p, 24); I.t0 = e.t; I.real = e.pad != 0; I.snd = false;
 		// cada explosao diferente: giro aleatorio em torno da vertical, espelho e velocidade da animacao +-10%
@@ -965,8 +983,8 @@ static void poll_shared()
 		I.wind[0] = cfg.wind_on ? e.wx * cfg.wind_gain : 0.f; I.wind[1] = cfg.wind_on ? e.wz * cfg.wind_gain : 0.f;
 		// destrocos com rastro de fumaca (so explosoes no chao com fragmentos)
 		{
-			static const int NT[8] = {14, 0, 5, 10, 0, 5, 14, 10};
-			static const float VMIN[8] = {70, 0, 30, 50, 0, 25, 70, 50}, VMAX[8] = {150, 0, 60, 110, 0, 50, 150, 110}, SZ[8] = {1.3f, 0, 0.5f, 1.0f, 0, 0.5f, 1.3f, 1.0f};
+			static const int NT[10] = {14, 0, 5, 10, 0, 5, 14, 10, 5, 0};
+			static const float VMIN[10] = {70, 0, 30, 50, 0, 25, 70, 50, 30, 0}, VMAX[10] = {150, 0, 60, 110, 0, 50, 150, 110, 60, 0}, SZ[10] = {1.3f, 0, 0.5f, 1.0f, 0, 0.5f, 1.3f, 1.0f, 0.5f, 0};
 			I.ntr = cfg.debris_on ? NT[ty] : 0; I.tr_end = 0;
 			for (int k = 0; k < I.ntr; k++)
 			{
@@ -1110,6 +1128,11 @@ static void setup_job_cb(CB &cb, Inst &I, Volume &vol, const Cam &cam, const dou
 	cb.wind[3] = TYPE_GROUND[I.type] ? cfg.wind_shear_m : 0.f;			// cisalhamento: perto do chao anda menos
 	cb.camO[3] = std::min(cfg.step_m, vol.dx * 0.6f);
 	cb.grid[0] = vol.nx * vol.dx; cb.grid[1] = vol.ny * vol.dx; cb.grid[2] = vol.nz * vol.dx; cb.grid[3] = w;
+	{	// volumes grandes (nuclear): o passo cresce para os passos disponiveis atravessarem a caixa inteira; senao o raio acaba no ar vazio antes de chegar na nuvem
+		float diag = sqrtf(cb.grid[0] * cb.grid[0] + cb.grid[1] * cb.grid[1] + cb.grid[2] * cb.grid[2]);
+		float need = diag / std::max(60.f, cb.misc[0] * 0.95f);
+		if (cb.camO[3] < need) cb.camO[3] = need;
+	}
 	cb.scales[0] = vol.mx[0]; cb.scales[1] = vol.mx[1]; cb.scales[2] = vol.mx[2]; cb.scales[3] = cfg.opacity * J.fade;
 	cb.scales2[0] = vol.mx[3]; cb.scales2[1] = vol.mx[4];
 	cb.detail2[2] = TYPE_GROUND[I.type] ? 1.f : 0.f;	// chao: sem desvanecer a face de baixo
@@ -1207,6 +1230,7 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 		if (g_freeze) t = 13.0 * VOL(I).t_end / 23.5;
 		else if (cfg.freeze_t >= 0) t = cfg.freeze_t;
 		float hold = std::min(cfg.hold_s, VOL(I).t_end + 0.5f), fend = hold + (cfg.fade_end - cfg.hold_s);
+		if (I.type == 9) { hold = VOL(I).t_end + 20.f; fend = hold + 45.f; }
 		float fade = t > hold ? (float)std::max(0.0, 1.0 - (t - hold) / std::max(0.1f, fend - hold)) : 1.f;
 		if (fade <= 0.f) { I.on = false; continue; }
 		g_have_spawn = true;
@@ -1219,7 +1243,7 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 			{
 				I.snd = true;
 				double rr = (dx * cam.z[0] + dy * cam.z[1] + dz * cam.z[2]) / std::max(dist, 1.0);
-				if (dist < 20000) play_sound(I.type == 6 ? 0 : I.type == 7 ? 3 : I.type, (float)dist, (float)std::max(-1.0, std::min(1.0, rr)));
+				if (dist < 20000) play_sound(I.type == 6 ? 0 : I.type == 7 ? 3 : I.type == 8 ? 2 : I.type == 9 ? 0 : I.type, (float)dist, (float)std::max(-1.0, std::min(1.0, rr)));
 			}
 		}
 		if (t < 0) continue;
@@ -1342,9 +1366,9 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 		ID3D11RenderTargetView *nrt = nullptr; G.ctx->OMSetRenderTargets(1, &nrt, nullptr);
 	}
 	// ondas de choque (depois da fumaca, para dobrar tambem a fumaca atras delas)
-	static const float WILSON[8] = {0.8f, 0.5f, 0.f, 0.35f, 0.f, 0.f, 0.8f, 0.35f};
-	float SHOCK_AMP[8]; for (int k = 0; k < 6; k++) SHOCK_AMP[k] = 3.0f * cfg.shock_type[k];
-	SHOCK_AMP[6] = SHOCK_AMP[0]; SHOCK_AMP[7] = SHOCK_AMP[3];
+	static const float WILSON[10] = {0.8f, 0.5f, 0.f, 0.35f, 0.f, 0.f, 0.8f, 0.35f, 0.f, 0.8f};
+	float SHOCK_AMP[10]; for (int k = 0; k < 6; k++) SHOCK_AMP[k] = 3.0f * cfg.shock_type[k];
+	SHOCK_AMP[6] = SHOCK_AMP[0]; SHOCK_AMP[7] = SHOCK_AMP[3]; SHOCK_AMP[8] = SHOCK_AMP[2]; SHOCK_AMP[9] = SHOCK_AMP[0];
 	float shock_gain = g_sh->opt_shock >= 0 ? g_sh->opt_shock : cfg.shock_gain;
 	for (const Job &J : jobs)
 	{
@@ -1415,6 +1439,7 @@ static void pod_inject(ID3D11DeviceContext *ctx, ID3D11Resource *dsv, ID3D11Rend
 		else if (cfg.freeze_t >= 0) t = cfg.freeze_t;
 		if (t < 0) continue;
 		float hold = std::min(cfg.hold_s, vol.t_end + 0.5f), fend = hold + (cfg.fade_end - cfg.hold_s);
+		if (I.type == 9) { hold = vol.t_end + 20.f; fend = hold + 45.f; }
 		float fade = t > hold ? (float)std::max(0.0, 1.0 - (t - hold) / std::max(0.1f, fend - hold)) : 1.f;
 		if (fade <= 0.f) continue;
 		// fora do campo de visao do pod? (centro da nuvem e raio da caixa)
@@ -1513,6 +1538,7 @@ static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *
 		else if (cfg.freeze_t >= 0) t = cfg.freeze_t;
 		if (t < 0) continue;
 		float hold = std::min(cfg.hold_s, vol.t_end + 0.5f), fend = hold + (cfg.fade_end - cfg.hold_s);
+		if (I.type == 9) { hold = vol.t_end + 20.f; fend = hold + 45.f; }
 		float fade = t > hold ? (float)std::max(0.0, 1.0 - (t - hold) / std::max(0.1f, fend - hold)) : 1.f;
 		if (fade <= 0.f) continue;
 		double dx = cam.p[0] - I.p[0], dy = cam.p[1] - I.p[1], dz = cam.p[2] - I.p[2];

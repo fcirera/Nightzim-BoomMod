@@ -35,9 +35,9 @@ static HWND g_wnd, g_path, g_log;
 enum { W_BTN, W_TOG, W_SEG, W_TAB, W_SLD };	// W_SLD: barra deslizante (value 0..opts.size()-1)
 struct Wd { int type = 0, page = 0, id = 0, value = 0, style = 0; Gdiplus::RectF r; std::wstring text; std::vector<std::wstring> opts; };
 static std::vector<Wd> g_w;
-static int g_cJdam, g_cCor, g_cQual, g_cDet, g_kShock, g_kWilson, g_kWind, g_kStock, g_cVar, g_kLazy, g_kBC;	// indices em g_w
-static int g_cN[7];	// variacoes por tipo de explosao (0 = desligada)
-static const wchar_t *N_FILE[7] = {L"jdam", L"aerea", L"nar", L"mk82", L"napalm", L"tank", L"mk82n"}, *N_KEY[7] = {L"n_jdam", L"n_aerea", L"n_pequena", L"n_media", L"n_napalm", L"n_tanque", L"n_mk82n"};
+static int g_cJdam, g_cCor, g_cQual, g_cDet, g_kShock, g_kWilson, g_kWind, g_kStock, g_cVar, g_kLazy, g_kBC, g_sMax;	// indices em g_w
+static int g_cN[8];	// variacoes por tipo de explosao (0 = desligada)
+static const wchar_t *N_FILE[8] = {L"jdam", L"aerea", L"nar", L"mk82", L"napalm", L"tank", L"mk82n", L"narn"}, *N_KEY[8] = {L"n_jdam", L"n_aerea", L"n_pequena", L"n_media", L"n_napalm", L"n_tanque", L"n_mk82n", L"n_narn"};
 static int g_page = 0, g_state = 0, g_hover_part = 0;	// g_state: -1 sem DCS, 0 nao instalado, 1 ativo, 2 desativado
 static std::wstring g_vram, g_vram_big, g_vram_note; static std::vector<std::wstring> g_lines; static bool g_wnd_title_dirty = false;
 static fs::path g_exe_dir, g_payload, g_sg, g_root;	// g_root = Saved Games\DCS\Nightzim BoomMod X
@@ -136,6 +136,24 @@ static fs::path find_dcs()
 	return L"";
 }
 
+// O DCS decide a pasta do Saved Games pelo arquivo dcs_variant.txt da instalacao: sem ele e "DCS"; com "openbeta" dentro e "DCS.openbeta".
+// Usar a mesma regra evita cair numa pasta DCS.openbeta antiga que sobrou no PC.
+static void apply_saved_games(const fs::path &dcs)
+{
+	std::error_code ec; PWSTR sg = nullptr;
+	if (!dcs.empty() && SHGetKnownFolderPath(FOLDERID_SavedGames, 0, nullptr, &sg) == S_OK)
+	{
+		fs::path base = sg; CoTaskMemFree(sg);
+		std::wstring name = L"DCS";
+		std::wifstream f(dcs / L"dcs_variant.txt"); std::wstring v;
+		if (f && (f >> v) && !v.empty()) name += L"." + v;
+		fs::path p = base / name;
+		if (fs::exists(p, ec) || !fs::exists(g_sg, ec)) g_sg = p;	// so troca se a pasta certa existir (ou se o palpite nao existir)
+	}
+	g_root = g_sg / L"Nightzim BoomMod X";
+	fs::create_directories(g_root, ec);
+}
+
 static fs::path dcs_path() { wchar_t b[1024]; GetWindowTextW(g_path, b, 1024); return fs::path(b); }
 
 // ---------------------------------------------------------------- lista de arquivos do pacote
@@ -191,11 +209,53 @@ static void check_reshade(const fs::path &dcs)
 				}
 		}
 	}
-	if (rs.empty()) { log(T(L"AVISO: ReShade nao encontrado em ", L"WARNING: ReShade not found in ") + bin.wstring() + T(L". Instale o ReShade \"with full add-on support\" (reshade.me) apontando para bin\\DCS.exe, DirectX 10/11/12.", L". Install ReShade \"with full add-on support\" (reshade.me) on bin\\DCS.exe, DirectX 10/11/12.")); return; }
-	log(T(L"ReShade encontrado: ", L"ReShade found: ") + rs.filename().wstring());
-	std::wifstream f(bin / L"ReShade.log"); std::wstring l; bool lim = false;
-	while (std::getline(f, l)) if (l.find(L"limited add-on functionality") != std::wstring::npos) lim = true;
-	if (lim) log(T(L"AVISO: este ReShade e a versao comum (add-ons limitados). Instale a versao \"with full add-on support\" de reshade.me, por cima (Update ReShade only).", L"WARNING: this is the regular ReShade build (limited add-ons). Install the \"with full add-on support\" build from reshade.me over it (Update ReShade only)."));
+	log(T(L"--- Checagem do ReShade ---", L"--- ReShade check ---"));
+	if (rs.empty())
+	{
+		if (fs::exists(bin / L"ReShade.ini", ec))
+			log(T(L"[X] Achei o ReShade.ini, mas não o dxgi.dll. O ReShade foi instalado como camada OpenXR. Rode o instalador do ReShade de novo, escolha bin\\DCS.exe, marque SÓ \"DirectX 10/11/12\" e deixe \"OpenXR\" desmarcado (vale também para VR).",
+				  L"[X] Found ReShade.ini but no dxgi.dll. ReShade was installed as an OpenXR layer. Run the ReShade setup again, pick bin\\DCS.exe, tick ONLY \"DirectX 10/11/12\" and leave \"OpenXR\" unticked (this also applies to VR)."));
+		else
+			log(T(L"[X] ReShade não encontrado em ", L"[X] ReShade not found in ") + bin.wstring() + T(L". Baixe em reshade.me a versão \"with full add-on support\", escolha bin\\DCS.exe e marque só \"DirectX 10/11/12\".", L". Download the \"with full add-on support\" build from reshade.me, pick bin\\DCS.exe and tick only \"DirectX 10/11/12\"."));
+		return;
+	}
+	log(T(L"[OK] ReShade instalado: ", L"[OK] ReShade installed: ") + rs.filename().wstring());
+	// versao (precisa ser 6.x) e assinatura digital (a versao comum e assinada; a "with full add-on support" nao e)
+	int major = 0, minor = 0; bool assinado = false;
+	{
+		DWORD hnd, sz = GetFileVersionInfoSizeW(rs.c_str(), &hnd); std::vector<char> b(sz); VS_FIXEDFILEINFO *fi = nullptr; UINT l = 0;
+		if (sz && GetFileVersionInfoW(rs.c_str(), 0, sz, b.data()) && VerQueryValueW(b.data(), L"\\", (void **)&fi, &l) && fi) { major = HIWORD(fi->dwFileVersionMS); minor = LOWORD(fi->dwFileVersionMS); }
+		std::ifstream f(rs, std::ios::binary); char h[4096] = {}; f.read(h, sizeof h);
+		DWORD pe = *(DWORD *)(h + 0x3c);
+		if (pe > 0 && pe < sizeof h - 0x108 && memcmp(h + pe, "PE\0\0", 4) == 0)
+		{
+			WORD magic = *(WORD *)(h + pe + 24); size_t dd = pe + 24 + (magic == 0x20b ? 112 : 96);	// tabela de diretorios do PE
+			assinado = *(DWORD *)(h + dd + 4 * 8 + 4) > 0;	// diretorio 4 = certificado digital
+		}
+	}
+	{	// o proprio ReShade avisa no log quando e a versao comum
+		std::ifstream lg0(bin / L"ReShade.log"); std::string l0; int n0 = 0;
+		while (lg0 && std::getline(lg0, l0) && n0++ < 3000) if (l0.find("limited add-on functionality") != std::string::npos) assinado = true;
+	}
+	std::wstring ver = std::to_wstring(major) + L"." + std::to_wstring(minor);
+	if (major >= 6) log(T(L"[OK] Versão do ReShade: ", L"[OK] ReShade version: ") + ver);
+	else log(T(L"[X] ReShade ", L"[X] ReShade ") + ver + T(L" é antigo. O mod precisa do ReShade 6.x.", L" is too old. The mod needs ReShade 6.x."));
+	if (assinado)
+		log(T(L"[X] Este é o ReShade COMUM (sem suporte completo a add-ons): o mod não vai aparecer no jogo. Baixe em reshade.me o SEGUNDO botão, \"ReShade 6.x with full add-on support\", e instale por cima (bin\\DCS.exe, só DirectX 10/11/12).",
+			  L"[X] This is the STANDARD ReShade (no full add-on support): the mod will not show up in game. On reshade.me use the SECOND download button, \"ReShade 6.x with full add-on support\", and install it over this one (bin\\DCS.exe, DirectX 10/11/12 only)."));
+	else log(T(L"[OK] É a versão \"with full add-on support\".", L"[OK] It is the \"with full add-on support\" build."));
+	// o ReShade carregou o add-on na ultima vez que o DCS abriu?
+	bool tem = fs::exists(bin / L"NightzimBoom.addon64", ec);
+	if (!tem) { log(T(L"[!] O add-on do mod ainda não está em bin: clique em INSTALAR / ATIVAR.", L"[!] The mod add-on is not in bin yet: click INSTALL / ACTIVATE.")); return; }
+	std::ifstream lg(bin / L"ReShade.log"); std::string line; bool tentou = false, registrou = false; int n = 0;
+	while (lg && std::getline(lg, line) && n++ < 3000)
+	{
+		if (line.find("NightzimBoom.addon64") != std::string::npos) tentou = true;
+		if (line.find("Registered add-on \"Nightzim") != std::string::npos) registrou = true;
+	}
+	if (registrou) log(T(L"[OK] Na última vez que o DCS abriu, o ReShade carregou o add-on do mod.", L"[OK] Last time DCS started, ReShade loaded the mod add-on."));
+	else if (tentou) log(T(L"[X] O ReShade tentou carregar o add-on e falhou. Veja bin\\ReShade.log e me mande esse arquivo.", L"[X] ReShade tried to load the add-on and failed. Check bin\\ReShade.log and send me that file."));
+	else log(T(L"[!] O ReShade ainda não carregou o add-on. Abra o DCS uma vez e volte aqui para conferir.", L"[!] ReShade has not loaded the add-on yet. Start DCS once and come back here to check."));
 }
 
 // ---------------------------------------------------------------- acoes
@@ -222,14 +282,14 @@ static bool want_stock_replace() { return chk(g_kStock); }
 static void update_vram_label()
 {
 	if (g_w.empty()) return;
-	static const wchar_t *nome_pt[7] = {L"JDAM (2000 lb)", L"Explosão aérea", L"Foguete", L"Mk-82 (média)", L"Napalm", L"Tiro de tanque", L"Mk-82 Novo Shader"};
-	static const wchar_t *nome_en[7] = {L"JDAM (2000 lb)", L"Air burst", L"Rocket", L"Mk-82 (medium)", L"Napalm", L"Tank gun", L"Mk-82 New Shader"};
+	static const wchar_t *nome_pt[8] = {L"JDAM (2000 lb)", L"Explosão aérea", L"Foguete", L"Mk-82 (média)", L"Napalm", L"Tiro de tanque", L"Mk-82 Novo Shader", L"Foguete Novo Shader"};
+	static const wchar_t *nome_en[8] = {L"JDAM (2000 lb)", L"Air burst", L"Rocket", L"Mk-82 (medium)", L"Napalm", L"Tank gun", L"Mk-82 New Shader", L"Rocket New Shader"};
 	fs::path dir = g_payload / L"bin" / L"NightzimBoom"; std::error_code ec;
 	if (!fs::exists(dir / L"jdam.nzv", ec)) dir = dcs_path() / L"bin" / L"NightzimBoom";
 	double k = sel(g_kBC) == 2 ? 0.25 : sel(g_kBC) == 1 ? 0.5 : 1.0;
 	double ini = 0, tot = 0; int nv = 0; bool falta = false, algum_off = false;
 	auto mb = [&](const std::wstring &f) { fs::path p = dir / f; return fs::exists(p, ec) ? (double)fs::file_size(p, ec) / 1048576.0 : -1.0; };
-	for (int i = 0; i < 7; i++)
+	for (int i = 0; i < 8; i++)
 	{
 		int n = sel(g_cN[i]); double row = 0, um = mb(std::wstring(N_FILE[i]) + L".nzv");
 		for (int v = 0; v < n; v++)
@@ -238,7 +298,8 @@ static void update_vram_label()
 			if (m < 0) { falta = true; break; }
 			row += m; nv++; if (v == 0) ini += m;
 		}
-		if (i == 0 && n > 0) { double m = mb(L"jdam_v1.nzv"); if (m > 0) { row += m; ini += m; nv++; } }	// JDAM classica acompanha a JDAM
+		if (i == 0 && n > 0) { double m = mb(L"jdam_v1.nzv"); if (m > 0) { row += m; ini += m; nv++; } }
+		if (i == 0 && sel(g_cJdam) == 2) { double m = mb(L"nuke.nzv"); if (m > 0) { row += m; ini += m; nv++; } }	// bomba nuclear no lugar da JDAM	// JDAM classica acompanha a JDAM
 		if (n == 0 && i < 6) algum_off = true;
 		tot += row;
 		wchar_t b[128];
@@ -262,7 +323,7 @@ static void load_options()
 	std::error_code ec;
 	bool has = fs::exists(ini_path(), ec);
 	auto f = [&](const wchar_t *s, const wchar_t *k, const wchar_t *d) { return has ? ini_get(s, k, d) : std::wstring(d); };
-	setsel(g_cJdam, f(L"instalador", L"jdam", L"v2") == L"v1" ? 1 : 0);
+	{ std::wstring j = f(L"instalador", L"jdam", L"v2"); setsel(g_cJdam, j == L"v1" ? 1 : j == L"nuke" ? 2 : 0); }
 	setsel(g_cCor, _wtof(f(L"color", L"realism", L"1").c_str()) > 0.5 ? 0 : 1);
 	int ms = _wtoi(f(L"render", L"max_steps", L"420").c_str()); setsel(g_cQual, ms <= 320 ? 0 : ms <= 450 ? 1 : 2);
 	double dt = _wtof(f(L"render", L"detail", L"0.8").c_str()); setsel(g_cDet, dt < 0.6 ? 0 : dt < 1.0 ? 1 : 2);
@@ -272,9 +333,10 @@ static void load_options()
 	setchk(g_kStock, _wtoi(f(L"instalador", L"substituir", L"1").c_str()) != 0);
 	{
 		std::wstring va = f(L"vram", L"variedade", L"baixa"); int def = va == L"alta" ? 5 : va == L"media" ? 2 : 1;
-		for (int i = 0; i < 7; i++) { int n = _wtoi(f(L"vram", N_KEY[i], std::to_wstring(i == 6 ? 0 : def).c_str()).c_str()); int mx = i == 6 ? 6 : 5; setsel(g_cN[i], n < 0 ? 0 : n > mx ? mx : n); }
+		for (int i = 0; i < 8; i++) { int n = _wtoi(f(L"vram", N_KEY[i], std::to_wstring(i == 2 || i == 3 ? 0 : i == 6 ? 6 : i == 7 ? 4 : def).c_str()).c_str()); int mx = i == 6 ? 6 : i == 7 ? 4 : 5; setsel(g_cN[i], n < 0 ? 0 : n > mx ? mx : n); }
 	}
 	setchk(g_kLazy, _wtoi(f(L"vram", L"sob_demanda", L"1").c_str()) != 0);
+	{ int n = _wtoi(f(L"explosion", L"max_simultaneas", L"30").c_str()); setsel(g_sMax, n < 0 ? 0 : n > 50 ? 50 : n); }
 	{ int c = _wtoi(f(L"vram", L"comprimir", L"0").c_str()); setsel(g_kBC, c < 0 || c > 2 ? 0 : c); }
 	update_vram_label();
 }
@@ -305,13 +367,14 @@ static void apply_options()
 	ini_set(L"shock", L"wilson", chk(g_kWilson) ? L"1.0" : L"0");
 	ini_set(L"wind", L"enabled", chk(g_kWind) ? L"1" : L"0");
 	{
-		for (int i = 0; i < 7; i++) ini_set(L"vram", N_KEY[i], std::to_wstring(sel(g_cN[i])));
+		for (int i = 0; i < 8; i++) ini_set(L"vram", N_KEY[i], std::to_wstring(sel(g_cN[i])));
 		ini_set(L"vram", L"sob_demanda", chk(g_kLazy) ? L"1" : L"0");
+		ini_set(L"explosion", L"max_simultaneas", std::to_wstring(sel(g_sMax)));
 		ini_set(L"vram", L"comprimir", std::to_wstring(sel(g_kBC) < 0 ? 0 : sel(g_kBC)));
 	}
 	// versao da JDAM: as duas ficam instaladas; o add-on escolhe pelo ini (ou pelo menu F10 no jogo)
-	std::wstring jv = sel(g_cJdam) == 1 ? L"v1" : L"v2";
-	log(L"JDAM: " + std::wstring(jv == L"v1" ? T(L"classica (v1.0)", L"classic (v1.0)") : T(L"nova (video real)", L"new (real footage)")));
+	std::wstring jv = sel(g_cJdam) == 1 ? L"v1" : sel(g_cJdam) == 2 ? L"nuke" : L"v2";
+	log(L"JDAM: " + std::wstring(jv == L"v1" ? T(L"classica (v1.0)", L"classic (v1.0)") : jv == L"nuke" ? T(L"Nuke 11kt (teste) no lugar da JDAM", L"Nuke 11kt (test) instead of the JDAM") : T(L"nova (video real)", L"new (real footage)")));
 	ini_set(L"instalador", L"jdam", jv);
 	// substituir (ou nao) as explosoes do jogo
 	bool rep = chk(g_kStock);
@@ -437,7 +500,7 @@ static void refresh_status()
 
 // ---------------------------------------------------------------- janela (interface propria, desenhada com GDI+)
 enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH };
-static const wchar_t *APP_VER = L"1.2.2"; static const UINT WM_UPD = WM_APP + 1;
+static const wchar_t *APP_VER = L"1.2.5"; static const UINT WM_UPD = WM_APP + 1;
 static int g_upd = 0; static std::wstring g_latest; static int g_bUpd = -1;	// g_upd: 0 verificando, 1 em dia, 2 ha versao nova, -1 sem resposta
 static bool g_pix = false; static Gdiplus::Bitmap *g_qr = nullptr, *g_icDisc = nullptr, *g_icInsta = nullptr, *g_icPix = nullptr;	// icones fornecidos pelo autor
 static const wchar_t *PIX_KEY = L"f5124246-e867-42ce-a16b-d139017560a5";
@@ -450,7 +513,7 @@ static void browse()
 	BROWSEINFOW bi = {}; bi.hwndOwner = g_wnd; bi.lpszTitle = T(L"Escolha a pasta de instalação do DCS World (a que tem bin\\DCS.exe)", L"Choose the DCS World install folder (the one with bin\\DCS.exe)");
 	bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
 	PIDLIST_ABSOLUTE pl = SHBrowseForFolderW(&bi);
-	if (pl) { wchar_t b[MAX_PATH]; SHGetPathFromIDListW(pl, b); CoTaskMemFree(pl); SetWindowTextW(g_path, b); refresh_status(); load_options(); }
+	if (pl) { wchar_t b[MAX_PATH]; SHGetPathFromIDListW(pl, b); CoTaskMemFree(pl); SetWindowTextW(g_path, b); apply_saved_games(b); refresh_status(); load_options(); InvalidateRect(g_wnd, nullptr, FALSE); }
 }
 
 using namespace Gdiplus;
@@ -591,7 +654,7 @@ static void build_ui()
 	float W = (float)(X1 - X0);
 	// --- opcoes (sempre nos mesmos indices: os valores sobrevivem a troca de idioma)
 	float y = 104, LBL = 176;
-	g_cJdam = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Explosão JDAM", L"JDAM explosion"), {T(L"Nova (vídeo real)", L"New (real footage)"), T(L"Clássica (v1.0)", L"Classic (v1.0)")}); y += 40;
+	g_cJdam = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Explosão JDAM", L"JDAM explosion"), {T(L"Nova (vídeo real)", L"New (real footage)"), T(L"Clássica (v1.0)", L"Classic (v1.0)"), T(L"Nuke 11kt (teste)", L"Nuke 11kt (test)")}); y += 40;
 	g_cCor = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Cores", L"Colours"), {T(L"Realistas", L"Realistic"), T(L"Clássicas", L"Classic")}); y += 40;
 	g_cQual = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Qualidade", L"Quality"), {T(L"Desempenho", L"Performance"), T(L"Equilíbrio", L"Balanced"), T(L"Máxima", L"Maximum")}); y += 40;
 	g_cDet = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Detalhe da fumaça", L"Smoke detail"), {T(L"Baixo", L"Low"), T(L"Médio", L"Medium"), T(L"Alto", L"High")}); y += 46;
@@ -600,16 +663,22 @@ static void build_ui()
 	g_kWind = add(W_TOG, 1, 0, X0, y, W / 2 - 8, 30, T(L"Fumaça deriva com o vento", L"Smoke drifts with the wind"));
 	g_kStock = add(W_TOG, 1, 0, X0 + W / 2 + 8, y, W / 2 - 8, 30, T(L"Substituir explosões do jogo", L"Replace stock explosions")); y += 70;
 	g_cVar = add(W_SEG, 9, ID_VRAM, X0, y, W, 34, L"", {L"", L"", L""});	// (antigo seletor global; fora de uso)
-	g_kBC = add(W_SEG, 3, ID_VRAM, X0, 352, W, 34, T(L"Compressão", L"Compression"), {T(L"Desligada", L"Off"), T(L"Metade", L"Half"), T(L"Um quarto (BC7)", L"One quarter (BC7)")});
-	g_kLazy = add(W_TOG, 3, ID_VRAM, X0, 394, W, 30, T(L"Carregar variações extras só quando usadas", L"Load extra variations only when used"));
-	for (int i = 0; i < 7; i++)
+	g_kBC = add(W_SEG, 3, ID_VRAM, X0, 376, W, 34, T(L"Compressão", L"Compression"), {T(L"Desligada", L"Off"), T(L"Metade", L"Half"), T(L"Um quarto (BC7)", L"One quarter (BC7)")});
+	g_kLazy = add(W_TOG, 3, ID_VRAM, X0, 414, W, 30, T(L"Carregar variações extras só quando usadas", L"Load extra variations only when used"));
+	for (int i = 0; i < 8; i++)
 	{	// barra deslizante: Não, 1..5 (Mk-82 Novo Shader: Não, 1..6 = variantes 1, 2, 3, 4, 7 e 8 da rodada de testes)
-		g_cN[i] = add(W_SLD, 3, ID_VRAM, X0, 104.f + 34 * i, W, 30, L"", {T(L"Não", L"Off"), L"1", L"2", L"3", L"4", L"5"});
+		g_cN[i] = add(W_SLD, 3, ID_VRAM, X0, 104.f + 30 * i, W, 28, L"", {T(L"Não", L"Off"), L"1", L"2", L"3", L"4", L"5"});
 		if (i == 6) g_w[g_cN[i]].opts.push_back(L"6");
+		if (i == 7) g_w[g_cN[i]].opts.pop_back();	// Foguete Novo Shader: Não, 1..4
+	}
+	{	// limite de explosoes ao mesmo tempo: 0 a 50
+		g_sMax = add(W_SLD, 3, ID_VRAM, X0, 104.f + 30 * 8, W, 28, T(L"Limite de explosões", L"Explosion limit"));
+		for (int k = 0; k <= 50; k++) g_w[g_sMax].opts.push_back(std::to_wstring(k));
 	}
 	(void)LBL;
 	if (had) for (int i = 0; i < keep_n && i < (int)g_w.size(); i++) g_w[i].value = keep_sel[i];
-	else for (int i = 0; i < 6; i++) g_w[g_cN[i]].value = 1;	// (a Mk-82 Novo Shader comeca em 0)
+	else for (int i = 0; i < 6; i++) g_w[g_cN[i]].value = (i == 2 || i == 3) ? 0 : 1; g_w[g_cN[6]].value = 6; g_w[g_cN[7]].value = 4;
+	if (!had) g_w[g_sMax].value = 30;	// padrao: novos shaders ligados, Foguete e Mk-82 antigos desligados
 	add(W_BTN, 1, ID_APPLY, X1 - 200, CH - 62, 200, 42, T(L"APLICAR OPÇÕES", L"APPLY OPTIONS"), {}, 1);
 	add(W_BTN, 3, ID_APPLY, X1 - 200, CH - 62, 200, 42, T(L"APLICAR OPÇÕES", L"APPLY OPTIONS"), {}, 1);
 	// --- abas e idioma (todas as paginas)
@@ -667,7 +736,7 @@ static void render(Bitmap &back)
 		fill_rr(g, RectF(30, yb + 72, 46, 4), 2, C_ACC);
 		text(g, T(L"Explosões volumétricas simuladas\npara o DCS World", L"Simulated volumetric explosions\nfor DCS World"), RectF(30, yb + 88, 350, 48), 16, Color(235, 232, 234, 237), 0, FontStyleRegular, L"Segoe UI", true);
 		fill_rr(g, RectF(30, CH - 40.f, 54, 22), 11, Color(70, 255, 255, 255));
-		text(g, L"v1.2.2", RectF(30, CH - 40.f, 70, 22), 12, Color(255, 255, 255, 255), 1, FontStyleBold);
+		text(g, L"v1.2.5", RectF(30, CH - 40.f, 70, 22), 12, Color(255, 255, 255, 255), 1, FontStyleBold);
 	}
 	// ---- abas
 	{
@@ -717,11 +786,11 @@ static void render(Bitmap &back)
 	if (g_page == 3)
 	{
 		spaced(g, T(L"EXPLOSÕES E VARIAÇÕES NA MEMÓRIA DE VÍDEO", L"EXPLOSIONS AND VARIATIONS IN VIDEO MEMORY"), (float)X0, 80, 11.5f, C_MUT, 1.4f);
-		fill_rr(g, RectF((REAL)X0, 432, W, 62), 12, C_CARD);
-		text(g, T(L"VRAM DO MOD", L"MOD VRAM"), RectF(X0 + 18.f, 440, 160, 18), 11.5f, C_MUT, 0, FontStyleBold);
-		text(g, g_vram_big, RectF(X0 + 18.f, 458, 200, 30), 24, C_ACC2, 0, FontStyleBold);
-		text(g, g_vram, RectF(X0 + 200.f, 440, W - 216, 48), 12.5f, C_TXT, 0, FontStyleRegular, L"Segoe UI", true);
-		text(g, g_vram_note, RectF((REAL)X0, 502, W, 36), 12, C_MUT, 0, FontStyleRegular, L"Segoe UI", true);
+		fill_rr(g, RectF((REAL)X0, 450, W, 62), 12, C_CARD);
+		text(g, T(L"VRAM DO MOD", L"MOD VRAM"), RectF(X0 + 18.f, 458, 160, 18), 11.5f, C_MUT, 0, FontStyleBold);
+		text(g, g_vram_big, RectF(X0 + 18.f, 476, 200, 30), 24, C_ACC2, 0, FontStyleBold);
+		text(g, g_vram, RectF(X0 + 200.f, 458, W - 216, 48), 12.5f, C_TXT, 0, FontStyleRegular, L"Segoe UI", true);
+		text(g, g_vram_note, RectF((REAL)X0, 518, W, 36), 12, C_MUT, 0, FontStyleRegular, L"Segoe UI", true);
 		text(g, T(L"Valem na próxima vez que abrir o DCS.", L"They take effect next time you start DCS."), RectF((REAL)X0, CH - 62.f, W - 220, 42), 12.5f, C_MUT);
 	}
 	// ---- controles
@@ -792,7 +861,7 @@ static void render(Bitmap &back)
 			fill_rr(g, RectF(tx0, cy - 2, tx1 - tx0, 4), 2, Color(255, 58, 63, 73));
 			float kx = tx0 + (tx1 - tx0) * d.value / mx;
 			if (d.value > 0) fill_rr(g, RectF(tx0, cy - 2, kx - tx0, 4), 2, C_ACC);
-			for (int k = 0; k <= mx; k++) { SolidBrush tb(k <= d.value ? C_ACC : Color(255, 84, 90, 101)); float px = tx0 + (tx1 - tx0) * k / mx; g.FillEllipse(&tb, px - 2.5f, cy - 2.5f, 5.f, 5.f); }
+			if (mx <= 12) for (int k = 0; k <= mx; k++) { SolidBrush tb(k <= d.value ? C_ACC : Color(255, 84, 90, 101)); float px = tx0 + (tx1 - tx0) * k / mx; g.FillEllipse(&tb, px - 2.5f, cy - 2.5f, 5.f, 5.f); }
 			SolidBrush kn(Color(255, 255, 255, 255)); float kr = (dn || hov) ? 8.f : 7.f; g.FillEllipse(&kn, kx - kr, cy - kr, 2 * kr, 2 * kr);
 			Pen kp(C_ACC, 2.f); g.DrawEllipse(&kp, kx - kr, cy - kr, 2 * kr, 2 * kr);
 			text(g, d.opts[d.value], RectF(tx1 + 14, box.Y, box.X + box.Width - tx1 - 18, box.Height), 13, d.value ? C_ACC2 : C_MUT, 1, FontStyleBold);
@@ -971,7 +1040,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int)
 	wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
 	g_exe_dir = fs::path(exe).parent_path(); g_payload = g_exe_dir / L"payload";
 	g_sg = find_saved_games(); g_root = g_sg / L"Nightzim BoomMod X";
-	std::error_code ec; fs::create_directories(g_root, ec);
+	std::error_code ec;
 	{ HDC sdc = GetDC(nullptr); g_s = GetDeviceCaps(sdc, LOGPIXELSX) / 96.f; ReleaseDC(nullptr, sdc); }
 	for (int i = 0; i < 3; i++) g_hero[i] = load_res_img(101 + i);
 	g_qr = load_res_img(104); g_icDisc = load_res_img(105); g_icInsta = load_res_img(106); g_icPix = load_res_img(107);
@@ -993,6 +1062,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int)
 	build_ui(); layout_children();
 
 	fs::path dcs = find_dcs();
+	apply_saved_games(dcs);
 	SetWindowTextW(g_path, dcs.c_str());
 	log(std::wstring(APP));
 	log(dcs.empty() ? T(L"Não achei o DCS automaticamente: clique em Procurar.", L"Could not find DCS automatically: click Browse.") : T(L"DCS encontrado: ", L"DCS found: ") + dcs.wstring());

@@ -1,5 +1,5 @@
 -- Nightzim BoomMod V - hook do DCS (Saved Games\DCS\Scripts\Hooks)
--- Passa a camera para o add-on do ReShade, cria a explosao quando voce aperta Ctrl+Shift+B
+-- Passa a camera para o add-on do ReShade, cria a explosao quando voce aperta Ctrl+Shift+B (e lanca um AIM-120 com Ctrl+Shift+Z)
 -- e responde a calibracao (plano proximo e campo de visao) usando a altura real do terreno.
 local function L(msg) pcall(function() log.write("NIGHTZIM", log.INFO, msg) end) end
 
@@ -327,6 +327,18 @@ function cb.onSimulationFrame()
 		nz.camera(c.p.x, c.p.y, c.p.z, c.x.x, c.x.y, c.x.z, c.y.x, c.y.y, c.y.z, c.z.x, c.z.y, c.z.z, t)
 
 		local pend, dist, typ = nz.spawn_pending()
+		if pend and typ == 9 then
+			-- Ctrl+Shift+Z: lanca um AIM-120 na direcao da camera (um F-16 da IA contra um Su-24M, criados na hora)
+			pcall(nz.ack); pend = false
+			local fx, fz = c.x.x, c.x.z
+			if math.sqrt(fx * fx + fz * fz) < 1e-3 then fx, fz = c.y.x, c.y.z end
+			if cb.state then
+				local ok2, r2 = pcall(net.dostring_in, cb.state, string.format("return tostring(nz_fire_aim and nz_fire_aim(%.1f, %.1f, %.4f, %.4f) or 'script da missao sem nz_fire_aim')", c.p.x, c.p.z, fx, fz))
+				L("AIM-120 pedido: " .. tostring(ok2) .. " " .. tostring(r2))
+			else
+				L("AIM-120: sem ambiente de script da missao (precisa de single player ou missao propria)")
+			end
+		end
 		if pend then
 			typ = typ or 0
 			-- "mira laser": raio do centro da visao ate o terreno
@@ -502,6 +514,54 @@ if not nzq_installed then
 		missionCommands.addCommand(d[1] .. string.format(" (%03d)", d[2]), dir, function() setd(d[2]) end)
 	end
 	end	-- nz_dev
+
+	-- Ctrl+Shift+Z (so na versao de teste): cria um F-16 com AIM-120C atras da camera e um Su-24M de frente, e manda atacar.
+	nz_fire_n = nz_fire_n or 0
+	nz_fire_aim = function(px, pz, fx, fz)
+		local d = math.sqrt(fx * fx + fz * fz)
+		if d < 1e-3 then return "direcao invalida" end
+		fx, fz = fx / d, fz / d
+		local rx, rz = -fz, fx
+		nz_fire_n = nz_fire_n + 1
+		local n = nz_fire_n
+		local alt = math.max(land.getHeight({x = px, y = pz}) + 1200, 2000)
+		local hd, hd2 = math.atan2(fz, fx), math.atan2(-fz, -fx)
+		local function wp(x, z, s)
+			return {x = x, y = z, alt = alt, alt_type = "BARO", type = "Turning Point", action = "Turning Point", speed = s, speed_locked = true,
+				ETA = 0, ETA_locked = false, formation_template = "", name = "", task = {id = "ComboTask", params = {tasks = {}}}}
+		end
+		local function mk(name, typ, x, z, h, s, pylons, task, fuel)
+			return {name = name, task = task, x = x, y = z, start_time = 0, communication = true, uncontrolled = false, visible = false, hidden = false, taskSelected = true,
+				route = {points = {wp(x, z, s), wp(x + math.cos(h) * 60000, z + math.sin(h) * 60000, s)}},
+				units = {{name = name .. "-1", type = typ, x = x, y = z, alt = alt, alt_type = "BARO", speed = s, heading = h, psi = -h, skill = "High",
+					payload = {pylons = pylons, fuel = fuel, flare = 60, chaff = 120, gun = 100}, onboard_num = tostring(100 + n)}}}
+		end
+		local sn, tn = "NZ AIM120 atirador " .. n, "NZ AIM120 alvo " .. n
+		local aim = "{40EF17B7-F508-45de-8566-6FFECC0C1AB8}"
+		local sx, sz = px - fx * 2000 + rx * 500, pz - fz * 2000 + rz * 500
+		local tx, tz = px + fx * 10000 + rx * 500, pz + fz * 10000 + rz * 500
+		coalition.addGroup(country.id.USA, Group.Category.AIRPLANE, mk(sn, "F-16C_50", sx, sz, hd, 250, {[1] = {CLSID = aim}, [9] = {CLSID = aim}}, "CAP", 3249))
+		coalition.addGroup(country.id.RUSSIA, Group.Category.AIRPLANE, mk(tn, "Su-24M", tx, tz, hd2, 200, {}, "Nothing", 6000))
+		timer.scheduleFunction(function()
+			local ok, err = pcall(function()
+				local sg, tg, tu = Group.getByName(sn), Group.getByName(tn), Unit.getByName(tn .. "-1")
+				if not (sg and tg and tu) then env.info("NIGHTZIM: AIM-120: grupos nao foram criados"); return end
+				local cs, ct = sg:getController(), tg:getController()
+				pcall(function() ct:setOption(AI.Option.Air.id.ROE, AI.Option.Air.val.ROE.WEAPON_HOLD) end)
+				pcall(function() ct:setOption(AI.Option.Air.id.REACTION_ON_THREAT, AI.Option.Air.val.REACTION_ON_THREAT.NO_REACTION) end)
+				pcall(function() cs:setOption(AI.Option.Air.id.ROE, AI.Option.Air.val.ROE.WEAPON_FREE) end)
+				cs:setTask({id = "AttackUnit", params = {unitId = tu:getID(), expend = "One", attackQtyLimit = true, attackQty = 1, groupAttack = false}})
+				env.info("NIGHTZIM: AIM-120: F-16 mandado atacar o Su-24M")
+			end)
+			if not ok then env.info("NIGHTZIM: AIM-120 erro: " .. tostring(err)) end
+		end, nil, timer.getTime() + 3)
+		timer.scheduleFunction(function()
+			pcall(function() local g = Group.getByName(sn); if g then g:destroy() end end)
+			pcall(function() local g = Group.getByName(tn); if g then g:destroy() end end)
+		end, nil, timer.getTime() + 300)
+		trigger.action.outText("Nightzim: AIM-120 a caminho (Ctrl+Shift+Z)", 6)
+		return "criados " .. sn
+	end
 	env.info("NIGHTZIM: rastreador de impactos e menu de vento ativos")
 end
 ]==]

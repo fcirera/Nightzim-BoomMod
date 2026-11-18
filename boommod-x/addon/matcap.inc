@@ -25,6 +25,8 @@ static std::unordered_map<ID3D11Resource *, uint32_t> g_cb_size;	// 0 = nao e co
 static float g_cap_tanv = 0, g_cap_near = 0; static uint64_t g_cap_proj_frame = 0, g_cap_view_frame = 0;
 static float g_cap_ax[3][3];							// frente, cima, direita (mundo DCS)
 static uint64_t g_frame_mt = 0;
+static uint64_t g_view_wr = 0, g_proj_wr = 0;	// ultimo quadro em que o DCS escreveu nos pontos conhecidos
+static bool g_view_weak = false;				// orientacao achada fora do buffer da camera (pode ser matriz de objeto)
 // ultima camera escrita nos pontos conhecidos, de QUALQUER vista (cabine, pod de mira, espelhos...): o add-on associa
 // cada uma ao buffer de profundidade em uso no desenho seguinte
 
@@ -232,6 +234,7 @@ static void on_cb_data(ID3D11Resource *r, const void *data, uint64_t offset, uin
 		const MatLoc &LP = g_alt_proj[i];
 		if (rd(LP, m))
 		{
+			g_proj_wr = g_frame_mt;
 			float tv, nr; int lay;
 			if (test_proj(m, tv, nr, lay) && lay == LP.layout) { g_cap_tanv = tv; g_cap_near = nr; g_cap_proj_frame = g_frame_mt; }
 			if (test_proj(m, tv, nr, lay, true) && lay == LP.layout) { g_any.tanv = tv; g_any.nearv = nr; g_any.asp = m[5] / m[0]; g_any.p = true; }
@@ -241,6 +244,7 @@ static void on_cb_data(ID3D11Resource *r, const void *data, uint64_t offset, uin
 		const MatLoc &LV = g_alt_view[i];
 		if (rd(LV, m))
 		{
+			g_view_wr = g_frame_mt;
 			float ax[3][3], tv;
 			if (LV.kind == 1 && test_view(m, LV.layout, 1, LV.perm, LV.sgn, ax, tv, -2.f, nullptr, true))
 			{	// eixos x, y, z da vista como vetores do mundo (sem sinais: so a permutacao GPU -> DCS)
@@ -306,7 +310,26 @@ static void matcap_frame(const Cam &cam, bool have_cam)
 	// (em VR a projecao de cada olho e descentrada e nunca e achada: cada tentativa falha dobra a espera, ate 10 min,
 	//  para a varredura nao ficar engasgando o jogo a cada 10 s)
 	static uint64_t next_try = 300; static int fails = 0;
-	if (have_cam && g_learn == 0 && (!g_loc_proj.r || !g_loc_view.r) && g_frame_mt >= next_try) { g_learn = 90; next_try = g_frame_mt + 100000000ull; }
+	// so aprende com a missao rodando (relogio da simulacao andando): no menu a camera fica alinhada com os eixos, a matriz
+	// de vista de verdade e descartada como "identidade" e uma matriz de objeto acabava escolhida no lugar (a explosao
+	// deixava de acompanhar a cabeca no VR)
+	static double last_t = -1; static int live = 0;
+	if (have_cam && cam.t != last_t) live = 120; else if (live > 0) live--;
+	if (have_cam) last_t = cam.t;
+	bool sim = live > 0 && have_cam && cam.t > 0;
+	// pontos conhecidos que o DCS parou de escrever (buffers recriados ao trocar de missao/vista): esquece e aprende de novo
+	if (sim && g_learn == 0 && g_frame_mt > 600)
+	{
+		bool vdead = g_loc_view.r && g_frame_mt - g_view_wr > 300, pdead = g_loc_proj.r && g_frame_mt - g_proj_wr > 300;
+		if (vdead || pdead)
+		{
+			logf("matrizes: o DCS parou de escrever %s - novo aprendizado", vdead && pdead ? "a projecao e a orientacao" : vdead ? "a orientacao" : "a projecao");
+			if (vdead) { g_loc_view = MatLoc(); for (int i = 0; i < NALT; i++) g_alt_view[i] = MatLoc(); g_gv.ok = false; g_view_weak = false; }
+			if (pdead) { g_loc_proj = MatLoc(); for (int i = 0; i < NALT; i++) g_alt_proj[i] = MatLoc(); g_gp.ok = false; }
+			g_any3.ok = false; next_try = g_frame_mt;
+		}
+	}
+	if (sim && g_learn == 0 && (!g_loc_proj.r || !g_loc_view.r || g_view_weak) && g_frame_mt >= next_try) { g_learn = 90; next_try = g_frame_mt + 100000000ull; }
 	if (g_learn > 0 && --g_learn == 0)
 	{
 		std::vector<std::pair<int, MatLoc>> P, V, Wv;
@@ -327,7 +350,11 @@ static void matcap_frame(const Cam &cam, bool have_cam)
 					alt[n++] = c.second;
 			logf("  usando %d copia(s) do buffer", n);
 		};
+		MatLoc old_p = g_loc_proj, old_ap[NALT], old_v = g_loc_view, old_av[NALT];
+		for (int i = 0; i < NALT; i++) { old_ap[i] = g_alt_proj[i]; old_av[i] = g_alt_view[i]; }
 		pick(P, g_loc_proj, g_alt_proj);
+		if (P.empty() && old_p.r) { g_loc_proj = old_p; for (int i = 0; i < NALT; i++) g_alt_proj[i] = old_ap[i]; }
+		bool strong = false;
 		// orientacao: so vale matriz que mora no mesmo buffer da projecao (o buffer "da camera"); matrizes de objetos, que
 		// aparecem centenas de vezes por quadro em outros buffers, ficam de fora. Entre uma matriz e a transposta (as duas
 		// passam quando a cabeca esta quase alinhada com os eixos) vence a de maior soma de semelhanca com a camera do Lua.
@@ -339,10 +366,15 @@ static void matcap_frame(const Cam &cam, bool have_cam)
 				std::sort(V2.begin(), V2.end(), [](const std::pair<int, MatLoc> &a, const std::pair<int, MatLoc> &b) { return a.second.score > b.second.score; });
 				for (size_t i = 0; i < std::min<size_t>(6, V2.size()); i++) logf("  vista (buffer da camera) %p+%u lay %d perm %d sinal %d: %d vezes, soma %.1f", (void *)V2[i].second.r, V2[i].second.off * 4, V2[i].second.layout, V2[i].second.perm, V2[i].second.sgn, V2[i].first, V2[i].second.score);
 				// (a contagem do primeiro vira a referencia do "pick")
-				V = V2;
+				V = V2; strong = true;
 			}
+			else if (fails < 3 || old_v.r) { if (!V.empty()) logf("  orientacao fora do buffer da camera: descartada (nova tentativa adiante)"); V.clear(); }
 		}
 		pick(V, g_loc_view, g_alt_view);
+		if (V.empty() && old_v.r) { g_loc_view = old_v; for (int i = 0; i < NALT; i++) g_alt_view[i] = old_av[i]; }
+		else if (!V.empty()) { g_view_weak = !strong; g_view_wr = g_frame_mt; }
+		g_proj_wr = g_frame_mt;
+		{ static int weak_tries = 0; if (g_loc_proj.r && g_loc_view.r && g_view_weak) { if (++weak_tries <= 6) next_try = g_frame_mt + 1500; else g_view_weak = false; } }
 		if (!g_loc_proj.r || !g_loc_view.r)
 		{
 			fails++; uint64_t wait = std::min<uint64_t>(600ull << std::min(fails, 6), g_loc_proj.r ? 1500ull : 36000ull);	// projecao ja achada: so falta a camera sair do alinhamento
