@@ -35,7 +35,7 @@ static HWND g_wnd, g_path, g_log;
 enum { W_BTN, W_TOG, W_SEG, W_TAB, W_SLD };	// W_SLD: barra deslizante (value 0..opts.size()-1)
 struct Wd { int type = 0, page = 0, id = 0, value = 0, style = 0; Gdiplus::RectF r; std::wstring text; std::vector<std::wstring> opts; };
 static std::vector<Wd> g_w;
-static int g_cJdam, g_cCor, g_cQual, g_cDet, g_kShock, g_kWilson, g_kWind, g_kStock, g_cVar, g_kLazy, g_kBC, g_sMax;	// indices em g_w
+static int g_cJdam, g_cMoab, g_cCor, g_cQual, g_cDet, g_kShock, g_kWilson, g_kWind, g_kStock, g_cVar, g_kLazy, g_kBC, g_sMax;	// indices em g_w
 static int g_cN[8];	// variacoes por tipo de explosao (0 = desligada)
 static const wchar_t *N_FILE[8] = {L"jdam", L"aerea", L"nar", L"mk82", L"napalm", L"tank", L"mk82n", L"narn"}, *N_KEY[8] = {L"n_jdam", L"n_aerea", L"n_pequena", L"n_media", L"n_napalm", L"n_tanque", L"n_mk82n", L"n_narn"};
 static int g_page = 0, g_state = 0, g_hover_part = 0;	// g_state: -1 sem DCS, 0 nao instalado, 1 ativo, 2 desativado
@@ -299,7 +299,7 @@ static void update_vram_label()
 			row += m; nv++; if (v == 0) ini += m;
 		}
 		if (i == 0 && n > 0) { double m = mb(L"jdam_v1.nzv"); if (m > 0) { row += m; ini += m; nv++; } }
-		if (i == 0 && sel(g_cJdam) == 2) { double m = mb(L"nuke.nzv"); if (m > 0) { row += m; ini += m; nv++; } }	// bomba nuclear no lugar da JDAM	// JDAM classica acompanha a JDAM
+		if (i == 0 && (sel(g_cJdam) == 2 || sel(g_cMoab) == 0)) { double m = mb(L"nuke.nzv"); if (m > 0) { row += m; ini += m; nv++; } }	// bomba nuclear no lugar da JDAM	// JDAM classica acompanha a JDAM
 		if (n == 0 && i < 6) algum_off = true;
 		tot += row;
 		wchar_t b[128];
@@ -324,6 +324,7 @@ static void load_options()
 	bool has = fs::exists(ini_path(), ec);
 	auto f = [&](const wchar_t *s, const wchar_t *k, const wchar_t *d) { return has ? ini_get(s, k, d) : std::wstring(d); };
 	{ std::wstring j = f(L"instalador", L"jdam", L"v2"); setsel(g_cJdam, j == L"v1" ? 1 : j == L"nuke" ? 2 : 0); }
+	{ std::wstring j0 = f(L"instalador", L"moab", L"nuke"); std::wstring j = f(L"instalador", L"scud", j0.c_str()); setsel(g_cMoab, j == L"nuke" ? 0 : 1); }
 	setsel(g_cCor, _wtof(f(L"color", L"realism", L"1").c_str()) > 0.5 ? 0 : 1);
 	int ms = _wtoi(f(L"render", L"max_steps", L"420").c_str()); setsel(g_cQual, ms <= 320 ? 0 : ms <= 450 ? 1 : 2);
 	double dt = _wtof(f(L"render", L"detail", L"0.8").c_str()); setsel(g_cDet, dt < 0.6 ? 0 : dt < 1.0 ? 1 : 2);
@@ -376,6 +377,9 @@ static void apply_options()
 	std::wstring jv = sel(g_cJdam) == 1 ? L"v1" : sel(g_cJdam) == 2 ? L"nuke" : L"v2";
 	log(L"JDAM: " + std::wstring(jv == L"v1" ? T(L"classica (v1.0)", L"classic (v1.0)") : jv == L"nuke" ? T(L"Nuke 11kt (teste) no lugar da JDAM", L"Nuke 11kt (test) instead of the JDAM") : T(L"nova (video real)", L"new (real footage)")));
 	ini_set(L"instalador", L"jdam", jv);
+	std::wstring mv = sel(g_cMoab) == 1 ? L"jdam" : L"nuke";
+	log(L"SCUD: " + std::wstring(mv == L"nuke" ? T(L"Nuke 11kt (teste)", L"Nuke 11kt (test)") : T(L"igual a JDAM", L"same as JDAM")));
+	ini_set(L"instalador", L"scud", mv);
 	// substituir (ou nao) as explosoes do jogo
 	bool rep = chk(g_kStock);
 	bool was = ini_get(L"instalador", L"substituir", L"1") != L"0";
@@ -500,7 +504,7 @@ static void refresh_status()
 
 // ---------------------------------------------------------------- janela (interface propria, desenhada com GDI+)
 enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH };
-static const wchar_t *APP_VER = L"1.2.5"; static const UINT WM_UPD = WM_APP + 1;
+static const wchar_t *APP_VER = L"1.2.6"; static const UINT WM_UPD = WM_APP + 1;
 static int g_upd = 0; static std::wstring g_latest; static int g_bUpd = -1;	// g_upd: 0 verificando, 1 em dia, 2 ha versao nova, -1 sem resposta
 static bool g_pix = false; static Gdiplus::Bitmap *g_qr = nullptr, *g_icDisc = nullptr, *g_icInsta = nullptr, *g_icPix = nullptr;	// icones fornecidos pelo autor
 static const wchar_t *PIX_KEY = L"f5124246-e867-42ce-a16b-d139017560a5";
@@ -655,6 +659,7 @@ static void build_ui()
 	// --- opcoes (sempre nos mesmos indices: os valores sobrevivem a troca de idioma)
 	float y = 104, LBL = 176;
 	g_cJdam = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Explosão JDAM", L"JDAM explosion"), {T(L"Nova (vídeo real)", L"New (real footage)"), T(L"Clássica (v1.0)", L"Classic (v1.0)"), T(L"Nuke 11kt (teste)", L"Nuke 11kt (test)")}); y += 40;
+	g_cMoab = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Explosão do míssil SCUD", L"SCUD missile explosion"), {T(L"Nuke 11kt (teste)", L"Nuke 11kt (test)"), T(L"Igual à JDAM", L"Same as JDAM")}); y += 40;
 	g_cCor = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Cores", L"Colours"), {T(L"Realistas", L"Realistic"), T(L"Clássicas", L"Classic")}); y += 40;
 	g_cQual = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Qualidade", L"Quality"), {T(L"Desempenho", L"Performance"), T(L"Equilíbrio", L"Balanced"), T(L"Máxima", L"Maximum")}); y += 40;
 	g_cDet = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Detalhe da fumaça", L"Smoke detail"), {T(L"Baixo", L"Low"), T(L"Médio", L"Medium"), T(L"Alto", L"High")}); y += 46;
@@ -736,7 +741,7 @@ static void render(Bitmap &back)
 		fill_rr(g, RectF(30, yb + 72, 46, 4), 2, C_ACC);
 		text(g, T(L"Explosões volumétricas simuladas\npara o DCS World", L"Simulated volumetric explosions\nfor DCS World"), RectF(30, yb + 88, 350, 48), 16, Color(235, 232, 234, 237), 0, FontStyleRegular, L"Segoe UI", true);
 		fill_rr(g, RectF(30, CH - 40.f, 54, 22), 11, Color(70, 255, 255, 255));
-		text(g, L"v1.2.5", RectF(30, CH - 40.f, 70, 22), 12, Color(255, 255, 255, 255), 1, FontStyleBold);
+		text(g, (std::wstring(L"v") + APP_VER).c_str(), RectF(30, CH - 40.f, 70, 22), 12, Color(255, 255, 255, 255), 1, FontStyleBold);
 	}
 	// ---- abas
 	{

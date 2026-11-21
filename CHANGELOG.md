@@ -5,6 +5,10 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 ## Unreleased - in testing / Em teste (ainda não lançado)
 
 **English**
+- **SCUD = nuclear (v1.2.6):** the SCUD missile now detonates with the 11 kt nuclear explosion. Installer: Options > "SCUD missile explosion" (Nuke 11kt (test) / Same as JDAM), on by default. The JDAM keeps its own explosion.
+- **Nuclear flash and lens effects (v1.2.6):** yellow-white flash over the whole screen at detonation, then the fireball glare (blinding core, bloom, light rays, horizontal lens streak, colored lens ring and lens ghosts that move and rotate as you turn your head), an orange haze and the view darkened while the eye readapts (about 10 s). Also in VR. Tunable in `NightzimBoom.ini`, section `[nuke]`: `clarao` (strength) and `adaptacao_s` (readaptation time).
+- **Nuke sound (v1.2.6):** the nuclear blast is now heard up to 90 km away (other explosions stay at 20 km).
+- **Missions can request explosions (v1.2.6):** a mission script can add `"x,y,z,type"` to the global table `nzx` and the mod draws that explosion (for example type 9 = nuclear, 0 = JDAM).
 - **Fix (v1.2.5): VR explosions not following the head.** In some sessions (seen with Virtual Desktop) the add-on located the game's camera matrix while still in the menu and locked onto the wrong one, so the explosions did not track head movement. It now learns only with the mission running, accepts only the matrix stored together with the eye projection, and learns again by itself if the game recreates it (add-on v24).
 - **Fix (v1.2.5): installer used `Saved Games\DCS.openbeta` on installs that use `Saved Games\DCS`.** The installer now reads the game's `dcs_variant.txt` to pick the right Saved Games folder. Thanks to the r/hoggit user who reported it.
 - **New (v1.2.5): ReShade check in the installer.** It warns when ReShade is missing, is older than 6.0, is the build without full add-on support, or did not load the add-on, and says what to do in each case.
@@ -36,6 +40,10 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 - **Blender:** `nightzim_boom` add-on 0.2.0 opens the mod's `.nzv` volumes as animated OpenVDB volumes.
 
 **Português**
+- **SCUD = nuclear (v1.2.6):** o míssil SCUD agora detona com a explosão nuclear de 11 kt. Instalador: Opções > "Explosão do míssil SCUD" (Nuke 11kt (teste) / Igual à JDAM), ligado por padrão. A JDAM continua com a explosão dela.
+- **Clarão nuclear e efeitos de lente (v1.2.6):** clarão branco amarelado na tela inteira na detonação; depois o brilho da bola de fogo (núcleo cegante, brilho espalhado, raios de luz, risco horizontal de lente, anel colorido e reflexos de lente que correm e giram quando você mexe a cabeça), uma neblina laranja e a vista escurecida se readaptando (cerca de 10 s). Funciona também no VR. Ajustável no `NightzimBoom.ini`, seção `[nuke]`: `clarao` (força) e `adaptacao_s` (tempo de readaptação).
+- **Som da nuke (v1.2.6):** o estrondo nuclear agora é ouvido até 90 km de distância (as outras explosões continuam em 20 km).
+- **Missões podem pedir explosões (v1.2.6):** um script de missão pode acrescentar `"x,y,z,tipo"` à tabela global `nzx` e o mod desenha a explosão (por exemplo tipo 9 = nuclear, 0 = JDAM).
 - **Correção (v1.2.5): explosões no VR não acompanhavam a cabeça.** Em algumas sessões (visto com o Virtual Desktop) o add-on localizava a matriz de câmera do jogo ainda no menu e travava na matriz errada, e as explosões não acompanhavam o movimento da cabeça. Agora ele só aprende com a missão rodando, só aceita a matriz guardada junto com a projeção do olho e aprende de novo sozinho se o jogo a recriar (add-on v24).
 - **Correção (v1.2.5): o instalador usava `Saved Games\DCS.openbeta` em instalações que usam `Saved Games\DCS`.** O instalador agora lê o `dcs_variant.txt` do jogo para escolher a pasta certa do Saved Games. Obrigado ao usuário do r/hoggit que avisou.
 - **Novo (v1.2.5): verificação do ReShade no instalador.** Ele avisa quando o ReShade está ausente, é anterior ao 6.0, é a versão sem suporte completo a add-ons ou não carregou o add-on, e diz o que fazer em cada caso.

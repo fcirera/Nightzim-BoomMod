@@ -46,7 +46,7 @@ struct Config
 	float dist[6] = {600, 600, 200, 400, 400, 150};
 	float shock_gain = 1.f, wilson_gain = 1.f, volume = 0.f;
 	float shock_type[6] = {0.8f, 0.1f, 0.13f, 0.3f, 0.f, 0.1f};	// fracao da onda de choque de referencia (3 m de refracao)
-	int dev = 0; int jdam_v1 = 0; int jdam_nuke = 0; int max_inst = 30;
+	int dev = 0; int jdam_v1 = 0; int jdam_nuke = 0; int moab_nuke = 1; float flash_gain = 1.f, flash_adapt_s = 6.f; int max_inst = 30;
 	int debris_on = 0; float realism = 1.f, firelight = 1.6f; float debris_density = 1.f, debris_glow = 1.f;
 	int wind_on = 1; float wind_gain = 1.f, wind_shear_m = 80.f, wind_delay_s = 0.6f;
 	float detail = 0.8f, detail_scale = 12.f, fire_gain = 0.6f, flame_min_t = 1450.f, edge_fade = 0.08f;
@@ -96,6 +96,9 @@ static void load_config()
 	c.dev = (int)ini_f("nightzim", "dev", 0.f);
 	c.max_inst = std::max(0, std::min(50, (int)ini_f("explosion", "max_simultaneas", 30.f)));
 	{ char b[16]; GetPrivateProfileStringA("instalador", "jdam", "v2", b, sizeof b, (g_dir + "NightzimBoom.ini").c_str()); c.jdam_v1 = !_stricmp(b, "v1"); c.jdam_nuke = !_stricmp(b, "nuke"); }
+	{ char a[16], b[16]; GetPrivateProfileStringA("instalador", "moab", "nuke", a, sizeof a, (g_dir + "NightzimBoom.ini").c_str());	// chave antiga (v1.2.6 de teste)
+	  GetPrivateProfileStringA("instalador", "scud", a, b, sizeof b, (g_dir + "NightzimBoom.ini").c_str()); c.moab_nuke = !_stricmp(b, "nuke"); }	// missil SCUD (tipo 9 do hook): explosao nuclear (padrao) ou igual a JDAM
+	c.flash_gain = ini_f("nuke", "clarao", c.flash_gain); c.flash_adapt_s = std::max(0.5f, ini_f("nuke", "adaptacao_s", c.flash_adapt_s));
 	c.debris_on = (int)ini_f("debris", "enabled", (float)c.debris_on);
 	c.realism = ini_f("color", "realism", c.realism); c.firelight = ini_f("color", "firelight", c.firelight);
 	c.debris_density = ini_f("debris", "smoke", c.debris_density); c.debris_glow = ini_f("debris", "glow", c.debris_glow);
@@ -107,7 +110,7 @@ static void load_config()
 		{ const char *k[6] = {"n_jdam", "n_aerea", "n_pequena", "n_media", "n_napalm", "n_tanque"}; for (int i = 0; i < 6; i++) c.vram_n[i] = std::max(-1, std::min(5, (int)ini_f("vram", k[i], (i == 2 || i == 3) ? 0.f : -1.f))); }
 		c.vram_n[7] = std::max(0, std::min(6, (int)ini_f("vram", "n_mk82n", 6.f)));	// Mk-82 Novo Shader: 0 = nenhuma, padrao 6 (todas), ate 6 variantes (1,2,3,4,7,8 da rodada) que entram no sorteio da Mk-82
 		c.vram_n[8] = std::max(0, std::min(4, (int)ini_f("vram", "n_narn", 4.f)));	// Foguete Novo Shader: 0 = nenhum (padrao), ate 4 variantes (1..4) que entram no sorteio do foguete
-		c.vram_n[9] = c.jdam_nuke ? 1 : 0;	// bomba nuclear no lugar da JDAM: so carrega (1 GB) quando escolhida no instalador
+		c.vram_n[9] = (c.jdam_nuke || c.moab_nuke) ? 1 : 0;	// volume nuclear: carrega quando a JDAM ou a MOAB usam a explosao nuclear
 		c.vram_n[6] = c.vram_n[0] == 0 ? 0 : 1;	// JDAM classica: acompanha a JDAM, sempre uma so
 		c.vram_lazy = (int)ini_f("vram", "sob_demanda", (float)c.vram_lazy); c.vram_bc = (int)ini_f("vram", "comprimir", (float)c.vram_bc);
 	}
@@ -340,15 +343,16 @@ struct Gfx
 	ID3D11ComputeShader *cs_sun = nullptr;
 	ID3D11PixelShader *ps_shock[2] = {};
 	ID3D11PixelShader *ps_trail[2] = {}; ID3D11ComputeShader *cs_trail = nullptr; ID3D11Buffer *cb_tr = nullptr;
+	ID3D11PixelShader *ps_flash = nullptr; ID3D11Buffer *cb_fl = nullptr;	// clarao da explosao nuclear e adaptacao da vista
 	ID3D11Texture2D *scene = nullptr; ID3D11ShaderResourceView *scene_srv = nullptr; UINT scene_w = 0, scene_h = 0; DXGI_FORMAT scene_fmt = DXGI_FORMAT_UNKNOWN;
 	ID3D11SamplerState *samp_wrap = nullptr;
 	ID3D11Texture3D *noise_tex = nullptr; ID3D11ShaderResourceView *noise_srv = nullptr;
 	std::unordered_map<ID3D11Resource *, ID3D11RenderTargetView *> bb_rtv;
 	bool ok = false;
-	void release_shaders() { SR(ps_trail[0]); SR(ps_trail[1]); SR(cs_trail); SR(ps_shock[0]); SR(ps_shock[1]); SR(cs_sun); SR(vs); for (int k = 0; k < 2; k++) { SR(ps[k]); SR(probe[k]); } }
+	void release_shaders() { SR(ps_flash); SR(ps_trail[0]); SR(ps_trail[1]); SR(cs_trail); SR(ps_shock[0]); SR(ps_shock[1]); SR(cs_sun); SR(vs); for (int k = 0; k < 2; k++) { SR(ps[k]); SR(probe[k]); } }
 	void release()
 	{
-		release_shaders(); SR(cb); SR(samp); SR(blend); SR(rs); SR(dss); SR(probe_rt); SR(probe_st); SR(probe_rtv); SR(state); SR(cb_tr); SR(scene_srv); SR(scene); SR(samp_wrap); SR(noise_srv); SR(noise_tex);
+		release_shaders(); SR(cb); SR(samp); SR(blend); SR(rs); SR(dss); SR(probe_rt); SR(probe_st); SR(probe_rtv); SR(state); SR(cb_tr); SR(cb_fl); SR(scene_srv); SR(scene); SR(samp_wrap); SR(noise_srv); SR(noise_tex);
 		for (auto &kv : bb_rtv) kv.second->Release(); bb_rtv.clear();
 		SR(ctx1); SR(ctx); SR(dev1); dev = nullptr; ok = false;
 	}
@@ -394,6 +398,8 @@ static bool build_shaders()
 	G.release_shaders();
 	G.cs_sun = cs; G.ps_shock[0] = psk[0]; G.ps_shock[1] = psk[1];
 	G.cs_trail = cst; G.ps_trail[0] = pst[0]; G.ps_trail[1] = pst[1];
+	if (ID3DBlob *c = compile(src, "ps_flash", "ps_5_0", false)) { G.dev->CreatePixelShader(c->GetBufferPointer(), c->GetBufferSize(), nullptr, &G.ps_flash); c->Release(); }
+	if (!G.ps_flash) logf("aviso: shader do clarao nuclear (ps_flash) nao compilou - sem clarao");
 	G.vs = vs; for (int k = 0; k < 2; k++) { G.ps[k] = ps[k]; G.probe[k] = pr[k]; }
 	logf("shaders compilados");
 	return true;
@@ -778,6 +784,7 @@ static bool init_gfx(device *device)
 	D3D11_BUFFER_DESC bd = {}; bd.ByteWidth = 16 * 22; bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	G.dev->CreateBuffer(&bd, nullptr, &G.cb);
 	{ D3D11_BUFFER_DESC tb = bd; tb.ByteWidth = 16 * 34; G.dev->CreateBuffer(&tb, nullptr, &G.cb_tr); }
+	{ D3D11_BUFFER_DESC tb = bd; tb.ByteWidth = 48; G.dev->CreateBuffer(&tb, nullptr, &G.cb_fl); }
 	D3D11_SAMPLER_DESC sd = {}; sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; sd.MaxLOD = D3D11_FLOAT32_MAX;
 	G.dev->CreateSamplerState(&sd, &G.samp);
 	D3D11_BLEND_DESC bl = {}; auto &rt = bl.RenderTarget[0];
@@ -945,6 +952,7 @@ static void poll_shared()
 		bool novoN = e.type == 2 && g_nvar[8] > 0 && vols[8 * MAXV].ready;	// Foguete Novo Shader disponivel
 		if (e.type >= 0 && e.type < 6 && cfg.vram_n[e.type] == 0 && !novo && !novoN) continue;	// tipo desligado pelo usuario: sem explosao
 		int ty = (e.type >= 0 && e.type < 6 && vols[e.type * MAXV].ready) ? e.type : 0;
+		if (e.type == 9 && cfg.moab_nuke && vols[9 * MAXV].ready) ty = 9;	// GBU-43 MOAB (o hook manda o tipo 9); sem a opcao, vira JDAM
 		if (novo || novoN)
 		{
 			// Mk-82 / foguete: cada variacao (antiga ou nova) tem a mesma chance de sair
@@ -1172,6 +1180,64 @@ static void fill_light(CB &cb, double tnow, double *sd)
 
 
 static uint32_t g_draws_total = 0;
+// ---------------------------------------------------------------- clarao nuclear
+// Clarao branco amarelado na tela inteira na detonacao; depois o brilho da bola de fogo (halo, raios e risco da lente)
+// no ponto da explosao, uma neblina laranja e a vista "queimada" que se readapta aos poucos.
+struct Flash { float f, d, g, t; double dir[3]; float size; bool on; };
+static Flash nuke_flash(const Cam &cam)
+{
+	Flash F = {}; double best = -1;
+	for (int k = 0; k < MAXI; k++)
+	{
+		const Inst &I = g_inst[k];
+		if (!I.on || I.type != 9) continue;
+		double t = cam.t - I.t0;
+		if (t < 0 || t > 40) continue;
+		double dx = I.p[0] - cam.p[0], dy = I.p[1] + 150.0 - cam.p[1], dz = I.p[2] - cam.p[2];	// centro da bola de fogo ~150 m acima do ponto
+		double dist = std::max(1.0, sqrt(dx * dx + dy * dy + dz * dz)), km = dist / 1000.0;
+		float near_ = (float)std::min(1.0, std::max(0.15, 25.0 / (km + 15.0)));	// 10 km = 1; 35 km = 0,5; 100 km = 0,2
+		float face = 0.55f + 0.45f * (float)std::max(0.0, (dx * cam.x[0] + dy * cam.x[1] + dz * cam.x[2]) / dist);
+		float k0 = near_ * cfg.flash_gain;
+		float ff = t < 0.04 ? (float)(t / 0.04) : t < 0.30 ? 1.f : (float)exp(-(t - 0.30) / 0.55);
+		float rise = (float)std::min(1.0, std::max(0.0, (t - 0.12) / 0.5));
+		float dd = rise * (t > 1.2 ? (float)exp(-(t - 1.2) / cfg.flash_adapt_s) : 1.f) * 0.55f;
+		float gg = (t < 0.05 ? (float)(t / 0.05) : 1.f) * (0.75f * (float)exp(-t / 3.5) + 0.25f * (float)exp(-t / 15.0)) * 1.6f;
+		float f = std::min(1.f, ff * k0 * face), d = std::min(0.9f, dd * k0 * face), g = gg * k0;
+		if (g + f > best)
+		{
+			best = g + f; F.f = f; F.d = d; F.g = g; F.t = (float)t; F.on = true;
+			F.dir[0] = dx / dist; F.dir[1] = dy / dist; F.dir[2] = dz / dist;
+			F.size = (float)std::min(2.5, std::max(0.45, 10.0 / (km + 2.0)));
+		}
+	}
+	if (F.on && F.f < 0.002f && F.d < 0.002f && F.g < 0.002f) F.on = false;
+	return F;
+}
+// fwd/right/up: raio de cada pixel = fwd + ndc.x * right + ndc.y * up (vetores do mundo, ja com a tangente e o descentro do VR)
+static void draw_flash(const Flash &F, const double *fwd, const double *right, const double *up, ID3D11RenderTargetView *rtv, const D3D11_VIEWPORT &vp)
+{
+	if (!G.ps_flash || !G.cb_fl || !F.on) return;
+	// posicao da detonacao na tela: resolve dir = l * (fwd + x * right + y * up)
+	const double *a = fwd, *b = right, *c = up, *s = F.dir;
+	auto det3 = [](const double *u, const double *v, const double *w) { return u[0] * (v[1] * w[2] - v[2] * w[1]) - u[1] * (v[0] * w[2] - v[2] * w[0]) + u[2] * (v[0] * w[1] - v[1] * w[0]); };
+	double D = det3(a, b, c), sx = 50, sy = 50, front = 0;
+	if (fabs(D) > 1e-12)
+	{
+		double l = det3(s, b, c) / D, lx = det3(a, s, c) / D, ly = det3(a, b, s) / D;
+		if (l > 1e-6) { sx = lx / l; sy = ly / l; front = 1; }
+	}
+	float cbv[12] = {F.f, F.d, F.g, F.t, (float)sx, (float)sy, (float)front, F.size,
+		(float)sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]), (float)sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]), 0.f, 0.f};
+	G.ctx->UpdateSubresource(G.cb_fl, 0, nullptr, cbv, 0, 0);
+	G.ctx->PSSetConstantBuffers(3, 1, &G.cb_fl);
+	G.ctx->OMSetRenderTargets(1, &rtv, nullptr);
+	G.ctx->OMSetBlendState(G.blend, nullptr, 0xffffffff);
+	G.ctx->RSSetViewports(1, &vp);
+	G.ctx->PSSetShader(G.ps_flash, nullptr, 0);
+	G.ctx->Draw(3, 0);
+	ID3D11RenderTargetView *nrt = nullptr; G.ctx->OMSetRenderTargets(1, &nrt, nullptr);
+}
+
 static void on_present(command_queue *, swapchain *sc, const rect *, const rect *, uint32_t, const rect *)
 {
 	{	// diagnostico: o add-on esta recebendo os quadros?
@@ -1243,7 +1309,7 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 			{
 				I.snd = true;
 				double rr = (dx * cam.z[0] + dy * cam.z[1] + dz * cam.z[2]) / std::max(dist, 1.0);
-				if (dist < 20000) play_sound(I.type == 6 ? 0 : I.type == 7 ? 3 : I.type == 8 ? 2 : I.type == 9 ? 0 : I.type, (float)dist, (float)std::max(-1.0, std::min(1.0, rr)));
+				if (dist < (I.type == 9 ? 90000 : 20000)) play_sound(I.type == 6 ? 0 : I.type == 7 ? 3 : I.type == 8 ? 2 : I.type == 9 ? 0 : I.type, (float)dist, (float)std::max(-1.0, std::min(1.0, rr)));
 			}
 		}
 		if (t < 0) continue;
@@ -1408,6 +1474,16 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 		ID3D11ShaderResourceView *nul[9] = {};
 		G.ctx->PSSetShaderResources(0, 9, nul);
 		ID3D11RenderTargetView *nrt = nullptr; G.ctx->OMSetRenderTargets(1, &nrt, nullptr);
+	}
+	{
+		Flash F = nuke_flash(cam);
+		if (F.on)
+		{
+			double r[3], u[3]; float sr = cfg.flip_right ? -1.f : 1.f;
+			for (int k = 0; k < 3; k++) { r[k] = cam.z[k] * tanv * aspect * sr; u[k] = cam.y[k] * tanv; }
+			D3D11_VIEWPORT vpf = {0, 0, (float)g_bb_w, (float)g_bb_h, 0, 1};
+			draw_flash(F, cam.x, r, u, rtv, vpf);
+		}
 	}
 	G.ctx1->SwapDeviceContextState(prev, nullptr);
 	if (prev) prev->Release();
@@ -1611,6 +1687,7 @@ static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *
 		G.ctx->PSSetShaderResources(0, 8, nul);
 	}
 	cfg.flip_right = saved_flip;
+	{ Flash F = nuke_flash(cam); if (F.on) draw_flash(F, cam.x, cam.z, cam.y, rtv, vp0); }
 	ID3D11RenderTargetView *nrt = nullptr; G.ctx->OMSetRenderTargets(1, &nrt, nullptr);
 	G.ctx1->SwapDeviceContextState(prev, nullptr);
 	if (prev) prev->Release();

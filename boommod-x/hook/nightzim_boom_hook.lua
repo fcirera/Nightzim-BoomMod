@@ -156,6 +156,8 @@ end
 -- tipo da explosao pelo nome da arma (modo multiplayer, sem a massa do explosivo)
 local function classify_name(n)
 	n = string.upper(n or "")
+	for _, k in ipairs({"SCUD", "R-17", "R_17", "8K14"}) do		-- missil SCUD: explosao nuclear (ou JDAM, conforme o instalador); a MOAB fica para depois
+		if string.find(n, k, 1, true) then return 9 end end
 	for _, k in ipairs({"NAPALM", "MK_77", "MK-77", "MK77", "BLU_27", "BLU-27", "BLU_1B", "BLU-1B", "BLU_1/B", "BLU-1/B", "ZB_500", "ZB-500", "INCEND", "FIREBOMB", "FIRE_BOMB", "FIRE BOMB"}) do
 		if string.find(n, k, 1, true) then return 4 end end
 	for _, k in ipairs({"MK_84", "MK-84", "GBU_31", "GBU-31", "GBU_10", "GBU-10", "GBU_24", "GBU-24", "BLU_109", "FAB_500", "FAB-500", "FAB_1500", "KAB_500", "KAB_1500", "BETAB", "AGM_84", "AGM_154", "KH_29", "KH-29", "KH_25", "KH_59"}) do
@@ -296,7 +298,7 @@ local function ballistic_step(t)
 				x, y, z = e.p.x + v.x * dt, e.p.y + v.y * dt, e.p.z + v.z * dt
 			end
 			local hg = ground(x, z)
-			if not hit and y - hg > 20 then ty = 1 else y = hg end
+			if ty ~= 9 and not hit and y - hg > 20 then ty = 1 else y = hg end
 			-- so conta se estava caindo ou rapido (descarta armas que so sairam do alcance do export)
 			local sp = math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
 			L(string.format("%s sumiu: ultima posicao %.0f m acima do chao, %.0f m/s, %.2f s antes; chao projetado: %s",
@@ -413,6 +415,21 @@ function cb.onSimulationFrame()
 			end
 		end
 
+		-- explosoes pedidas pelo script da missao: nzx[#nzx + 1] = "x,y,z,tipo" (ex.: a MOAB lancada pelo C-130 numa missao)
+		if cb.injected and cb.n % 3 == 0 then
+			local q = net.dostring_in(cb.state or "scripting", "return nzx_pop and nzx_pop() or ''")
+			if q and q ~= "" then
+				for x, y, z, ty in string.gmatch(q, "([%-%d%.]+),([%-%d%.]+),([%-%d%.]+),(%d+)") do
+					x, y, z, ty = tonumber(x), tonumber(y), tonumber(z), tonumber(ty)
+					if ty ~= 1 then y = ground(x, z) end
+					local wx, wz = wind_at(x, y, z)
+					nz.spawn(x, y, z, t, ty, 1, wx, wz)
+					sun_update(x, z, t)
+					L(string.format("explosao pedida pela missao: tipo %d em x=%.1f y=%.1f z=%.1f", ty, x, y, z))
+				end
+			end
+		end
+
 		local r = {nz.probe()}
 		if r[1] then solve_calib(r[1], r[2], r[3], {unpack(r, 4, 15)}) end
 	end)
@@ -470,6 +487,8 @@ if not nzq_installed then
 	end
 	timer.scheduleFunction(tick, nil, timer.getTime() + 0.05)
 	nzq_pop = function() local s = table.concat(nzq, ";"); nzq = {}; return s end
+	nzx = nzx or {}
+	nzx_pop = function() local q = nzx or {}; nzx = {}; return table.concat(q, ";") end
 
 	-- vento das explosoes Nightzim (menu F10). O DCS nao deixa script mudar o vento real do clima;
 	-- isto define o vento que a fumaca das nossas explosoes usa. nz_wo = {velocidade m/s, direcao DE ONDE vem, graus}

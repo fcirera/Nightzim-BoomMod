@@ -435,3 +435,68 @@ float4 ps_trail(VSOut i) : SV_Target
 	c = lerp(c, fog.rgb, fa) * cv;
 	return float4(c, tr);
 }
+
+
+// ---------------------------------------------------------------- clarao nuclear (tela inteira)
+// a: x = clarao (mistura para o branco amarelado), y = vista "queimada" se readaptando, z = brilho da bola de fogo
+//    (halo, raios e risco horizontal da lente), w = tempo desde a detonacao (s)
+// b: xy = posicao da detonacao na tela (NDC), z = 1 se esta na frente da camera, w = escala do brilho (perto = maior)
+// c: xy = tamanho da tela em tangente (para o halo ficar redondo em qualquer proporcao e no VR)
+cbuffer FL : register(b3) { float4 fa; float4 fb; float4 fc; };
+float fl_hash(float n) { return frac(sin(n) * 43758.5453); }
+float fl_rays(float ang, float t)
+{
+	// raios irregulares saindo da bola de fogo: soma de faixas com largura e brilho sorteados, girando bem devagar
+	float s = 0;
+	[unroll] for (int k = 0; k < 3; k++)
+	{
+		float n = 9.0 + 14.0 * k;
+		float a = ang * n / 6.2831853 + t * (0.010 + 0.006 * k) + 17.3 * k;
+		float id = floor(a), fr = frac(a) - 0.5;
+		float w = 0.08 + 0.22 * fl_hash(id + 31.7 * k);
+		s += (0.35 + 0.65 * fl_hash(id * 1.37 + k)) * exp(-fr * fr / (w * w * 0.08));
+	}
+	return s / 3.0;
+}
+float4 ps_flash(VSOut i) : SV_Target
+{
+	float f = saturate(fa.x), d = saturate(fa.y), g = max(fa.z, 0.0), t = fa.w;
+	float3 white = lerp(float3(1.0, 0.84, 0.52), float3(1.0, 0.95, 0.76), f);	// branco amarelado no pico, mais quente enquanto apaga
+	float3 dark = float3(0.010, 0.011, 0.016);
+
+	float3 L = 0;
+	if (g > 0.001)
+	{
+		float sz = fb.w;
+		float2 p = (i.ndc - fb.xy) * fc.xy / sz;	// distancia em tangente, normalizada pelo tamanho do brilho
+		float r = length(p);
+		float front = fb.z;
+		float core = exp(-r * r / 0.0035);						// nucleo cegante
+		float halo = 0.55 / (1.0 + r * r / 0.012) + 0.22 / (1.0 + r * r / 0.12);	// brilho que se espalha (bloom)
+		// os raios giram quando a explosao corre pela tela (mexendo a cabeca), como os da lente
+		float spin = atan2(fb.y * fc.y, fb.x * fc.x + 1e-4) * 0.55 + (fb.x * fc.x - fb.y * fc.y) * 0.35;
+		float ang = atan2(p.y, p.x) + spin;
+		float rays = fl_rays(ang, t) * 0.9 / (1.0 + r * 3.5) * smoothstep(0.0, 0.05, r);
+		float streak = exp(-abs(p.y) / 0.010) * exp(-abs(p.x) / 0.9) * 0.9;	// risco horizontal da lente (anamorfico)
+		float3 ring = float3(exp(-pow((r - 0.47) / 0.030, 2)), exp(-pow((r - 0.45) / 0.030, 2)), exp(-pow((r - 0.43) / 0.030, 2))) * 0.16;	// anel colorido da lente
+		float3 hot = float3(1.0, 0.93, 0.78), warm = float3(1.0, 0.55, 0.22);
+		L = front * g * (lerp(warm, hot, saturate(core * 1.5)) * (core * 2.0 + halo) + warm * rays + lerp(warm, hot, 0.5) * streak + ring);
+		// reflexos da lente: discos coloridos na linha que liga a explosao ao centro da tela, do outro lado do centro
+		float2 sp = fb.xy * fc.xy;
+		float edge = saturate(1.0 - length(sp) * 0.35);
+		static const float GS[6] = {0.42, -0.22, -0.55, -0.85, -1.25, -1.7};
+		static const float GR[6] = {0.030, 0.055, 0.020, 0.090, 0.040, 0.140};
+		static const float3 GC[6] = {float3(1.0, 0.75, 0.40), float3(0.45, 0.85, 0.55), float3(1.0, 0.45, 0.25), float3(0.40, 0.60, 1.00), float3(0.95, 0.85, 0.40), float3(0.70, 0.45, 0.95)};
+		float2 pp = i.ndc * fc.xy;
+		[unroll] for (int k = 0; k < 6; k++)
+		{
+			float dg = length(pp - sp * GS[k]) / (GR[k] * sz);
+			float disc = saturate((1.0 - dg) * 6.0) * (0.35 + 0.65 * dg * dg);	// disco com borda mais clara
+			L += front * edge * g * GC[k] * disc * 0.24;
+		}
+		L += g * float3(1.0, 0.52, 0.26) * 0.20;	// neblina laranja na tela toda (luz da bola de fogo espalhada no ar)
+	}
+	float a = (1.0 - f) * (1.0 - d) * (1.0 - saturate(g * 0.18));
+	// mistura com o blend do mod (cor + destino * alfa)
+	return float4(white * f + (dark * d + L) * (1.0 - f), a);
+}
