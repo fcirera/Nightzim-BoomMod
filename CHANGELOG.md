@@ -5,6 +5,7 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 ## Unreleased - in testing / Em teste (ainda não lançado)
 
 **English**
+- **Installer options cleaned up (v1.2.7):** the "Nuke 11kt (test)" choice was removed from the JDAM explosion (the nuke is now only on the SCUD), and the old Rocket and old Mk-82 rows were removed from the VRAM tab (the New Shader versions replace them).
 - **Installer fix (v1.2.7): updates did not finish.** When updating over an existing install on the same drive, copying a file over the old one failed and the update stopped half way (the error lines with accents were also dropped from the log). Files are now replaced with the Windows copy/move calls and the log is written in UTF-8.
 - **Changelog in the installer (v1.2.7):** new "WHAT'S NEW" tab with these notes.
 - **SCUD smoke trail (v1.2.7):** the SCUD now leaves its own volumetric smoke trail instead of the game's thin line. Reddish just behind the nozzle (nitric acid fuel), light brown after a few seconds and greyish brown as it ages; it grows, rolls, drifts with the wind and starts forming about 10 m behind the nozzle. The flame is a cone of hot gas starting exactly at the nozzle (white core, yellow to orange envelope, turbulence and flicker) and always points backwards along the flight path. Same tone curve and haze as the explosions, also in VR. Tunable in `NightzimBoom.ini`, section `[rastro]`: `scud` (0/1), `densidade`, `tamanho`, `bocal_m`. Needs the updated hook and `nzboom.dll` from this package.
@@ -45,6 +46,7 @@ Every update gets an entry here. *Cada atualização ganha uma entrada aqui.*
 - **Blender:** `nightzim_boom` add-on 0.2.0 opens the mod's `.nzv` volumes as animated OpenVDB volumes.
 
 **Português**
+- **Opções do instalador enxutas (v1.2.7):** saiu a opção "Nuke 11kt (teste)" da explosão da JDAM (a nuke agora fica só no SCUD), e saíram da aba VRAM as linhas do Foguete antigo e da Mk-82 antiga (as versões Novo Shader substituem).
 - **Correção no instalador (v1.2.7): atualizações não terminavam.** Ao atualizar por cima de uma instalação no mesmo disco, a cópia de um arquivo por cima do antigo falhava e a atualização parava no meio (e as linhas de erro com acento sumiam do registro). Agora os arquivos são trocados pelas funções de cópia do Windows e o registro é gravado em UTF-8.
 - **Notas de atualização no instalador (v1.2.7):** nova aba "NOVIDADES" com estas notas.
 - **Rastro de fumaça do SCUD (v1.2.7):** o SCUD agora deixa um rastro de fumaça volumétrico próprio no lugar da linha fina do jogo. Avermelhado logo atrás do bocal (combustível de ácido nítrico), marrom-claro depois de alguns segundos e pardo-acinzentado ao envelhecer; engorda, forma rolos, é levado pelo vento e começa a se formar uns 10 m atrás do bocal. A chama é um cone de gás quente que nasce exatamente no bocal (núcleo branco, envelope amarelo a laranja, turbulência e cintilação) e aponta sempre para trás do voo. Mesma curva de tom e névoa das explosões, também no VR. Ajustável no `NightzimBoom.ini`, seção `[rastro]`: `scud` (0/1), `densidade`, `tamanho`, `bocal_m`. Precisa do hook e do `nzboom.dll` novos deste pacote.

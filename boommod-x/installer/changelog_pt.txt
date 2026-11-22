@@ -1,6 +1,8 @@
 Nightzim BoomMod X - novidades
 (mais novas primeiro; histórico completo: github.com/fcirera/Nightzim-BoomMod/blob/main/CHANGELOG.md)
 
+• Opções do instalador enxutas (v1.2.7): saiu a opção "Nuke 11kt (teste)" da explosão da JDAM (a nuke agora fica só no SCUD), e saíram da aba VRAM as linhas do Foguete antigo e da Mk-82 antiga (as versões Novo Shader substituem).
+
 • Correção no instalador (v1.2.7): atualizações não terminavam. Ao atualizar por cima de uma instalação no mesmo disco, a cópia de um arquivo por cima do antigo falhava e a atualização parava no meio (e as linhas de erro com acento sumiam do registro). Agora os arquivos são trocados pelas funções de cópia do Windows e o registro é gravado em UTF-8.
 
 • Notas de atualização no instalador (v1.2.7): nova aba "NOVIDADES" com estas notas.

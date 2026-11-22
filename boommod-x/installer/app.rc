@@ -29,3 +29,6 @@ BEGIN
 END
 108 RCDATA "changelog_pt.txt"
 109 RCDATA "changelog_en.txt"
+110 RCDATA "nov1.jpg"
+111 RCDATA "nov2.jpg"
+112 RCDATA "nov3.jpg"

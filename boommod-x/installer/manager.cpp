@@ -30,7 +30,9 @@ namespace Gdiplus { using std::min; using std::max; }
 namespace fs = std::filesystem;
 
 static const wchar_t *APP = L"Nightzim BoomMod X";
-static HWND g_wnd, g_path, g_log, g_chg;	// g_chg: notas de atualizacao (aba NOVIDADES)
+static HWND g_wnd, g_path, g_log, g_chg;
+static Gdiplus::Bitmap *g_nov[3] = {};	// fotos da aba NOVIDADES (quadros dos videos de teste)
+static const int NOV_Y = 216;	// topo do texto da aba NOVIDADES (as fotos ficam acima)	// g_chg: notas de atualizacao (aba NOVIDADES)
 // controles desenhados por nos (botao, chave liga/desliga, seletor segmentado, aba)
 enum { W_BTN, W_TOG, W_SEG, W_TAB, W_SLD };	// W_SLD: barra deslizante (value 0..opts.size()-1)
 struct Wd { int type = 0, page = 0, id = 0, value = 0, style = 0; Gdiplus::RectF r; std::wstring text; std::vector<std::wstring> opts; };
@@ -327,7 +329,7 @@ static void update_vram_label()
 			row += m; nv++; if (v == 0) ini += m;
 		}
 		if (i == 0 && n > 0) { double m = mb(L"jdam_v1.nzv"); if (m > 0) { row += m; ini += m; nv++; } }
-		if (i == 0 && (sel(g_cJdam) == 2 || sel(g_cMoab) == 0)) { double m = mb(L"nuke.nzv") + mb(L"nuke_dust.nzv"); if (m > 0) { row += m; ini += m; nv++; } }	// bomba nuclear no lugar da JDAM	// JDAM classica acompanha a JDAM
+		if (i == 0 && sel(g_cMoab) == 0) { double m = mb(L"nuke.nzv") + mb(L"nuke_dust.nzv"); if (m > 0) { row += m; ini += m; nv++; } }	// bomba nuclear no lugar da JDAM	// JDAM classica acompanha a JDAM
 		if (n == 0 && i < 6) algum_off = true;
 		tot += row;
 		wchar_t b[128];
@@ -351,7 +353,7 @@ static void load_options()
 	std::error_code ec;
 	bool has = fs::exists(ini_path(), ec);
 	auto f = [&](const wchar_t *s, const wchar_t *k, const wchar_t *d) { return has ? ini_get(s, k, d) : std::wstring(d); };
-	{ std::wstring j = f(L"instalador", L"jdam", L"v2"); setsel(g_cJdam, j == L"v1" ? 1 : j == L"nuke" ? 2 : 0); }
+	{ std::wstring j = f(L"instalador", L"jdam", L"v2"); setsel(g_cJdam, j == L"v1" ? 1 : 0); }
 	{ std::wstring j0 = f(L"instalador", L"moab", L"nuke"); std::wstring j = f(L"instalador", L"scud", j0.c_str()); setsel(g_cMoab, j == L"nuke" ? 0 : 1); }
 	setsel(g_cCor, _wtof(f(L"color", L"realism", L"1").c_str()) > 0.5 ? 0 : 1);
 	int ms = _wtoi(f(L"render", L"max_steps", L"420").c_str()); setsel(g_cQual, ms <= 320 ? 0 : ms <= 450 ? 1 : 2);
@@ -362,7 +364,7 @@ static void load_options()
 	setchk(g_kStock, _wtoi(f(L"instalador", L"substituir", L"1").c_str()) != 0);
 	{
 		std::wstring va = f(L"vram", L"variedade", L"baixa"); int def = va == L"alta" ? 5 : va == L"media" ? 2 : 1;
-		for (int i = 0; i < 8; i++) { int n = _wtoi(f(L"vram", N_KEY[i], std::to_wstring(i == 2 || i == 3 ? 0 : i == 6 ? 6 : i == 7 ? 4 : def).c_str()).c_str()); int mx = i == 6 ? 6 : i == 7 ? 4 : 5; setsel(g_cN[i], n < 0 ? 0 : n > mx ? mx : n); }
+		for (int i = 0; i < 8; i++) { int n = _wtoi(f(L"vram", N_KEY[i], std::to_wstring(i == 2 || i == 3 ? 0 : i == 6 ? 6 : i == 7 ? 4 : def).c_str()).c_str()); int mx = i == 6 ? 6 : i == 7 ? 4 : 5; if (i == 2 || i == 3) n = 0; setsel(g_cN[i], n < 0 ? 0 : n > mx ? mx : n); }
 	}
 	setchk(g_kLazy, _wtoi(f(L"vram", L"sob_demanda", L"1").c_str()) != 0);
 	{ int n = _wtoi(f(L"explosion", L"max_simultaneas", L"30").c_str()); setsel(g_sMax, n < 0 ? 0 : n > 50 ? 50 : n); }
@@ -402,7 +404,7 @@ static void apply_options()
 		ini_set(L"vram", L"comprimir", std::to_wstring(sel(g_kBC) < 0 ? 0 : sel(g_kBC)));
 	}
 	// versao da JDAM: as duas ficam instaladas; o add-on escolhe pelo ini (ou pelo menu F10 no jogo)
-	std::wstring jv = sel(g_cJdam) == 1 ? L"v1" : sel(g_cJdam) == 2 ? L"nuke" : L"v2";
+	std::wstring jv = sel(g_cJdam) == 1 ? L"v1" : L"v2";
 	log(L"JDAM: " + std::wstring(jv == L"v1" ? T(L"classica (v1.0)", L"classic (v1.0)") : jv == L"nuke" ? T(L"Nuke 11kt (teste) no lugar da JDAM", L"Nuke 11kt (test) instead of the JDAM") : T(L"nova (video real)", L"new (real footage)")));
 	ini_set(L"instalador", L"jdam", jv);
 	std::wstring mv = sel(g_cMoab) == 1 ? L"jdam" : L"nuke";
@@ -619,7 +621,7 @@ static void layout_children()
 	ShowWindow(g_log, g_page == 2 ? SW_SHOW : SW_HIDE);
 	if (g_chg)
 	{
-		MoveWindow(g_chg, P(X0), P(84), P(X1 - X0), P(CH - 84 - 56), TRUE);
+		MoveWindow(g_chg, P(X0), P(NOV_Y), P(X1 - X0), P(CH - NOV_Y - 56), TRUE);
 		static int lang = -1;
 		if (lang != (int)g_pt) { lang = (int)g_pt; SetWindowTextW(g_chg, load_res_text(g_pt ? 108 : 109).c_str()); }
 		ShowWindow(g_chg, g_page == 4 ? SW_SHOW : SW_HIDE);
@@ -704,7 +706,7 @@ static void build_ui()
 	float W = (float)(X1 - X0);
 	// --- opcoes (sempre nos mesmos indices: os valores sobrevivem a troca de idioma)
 	float y = 104, LBL = 176;
-	g_cJdam = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Explosão JDAM", L"JDAM explosion"), {T(L"Nova (vídeo real)", L"New (real footage)"), T(L"Clássica (v1.0)", L"Classic (v1.0)"), T(L"Nuke 11kt (teste)", L"Nuke 11kt (test)")}); y += 40;
+	g_cJdam = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Explosão JDAM", L"JDAM explosion"), {T(L"Nova (vídeo real)", L"New (real footage)"), T(L"Clássica (v1.0)", L"Classic (v1.0)")}); y += 40;	// a nuke saiu da JDAM (v1.2.7): fica so no SCUD
 	g_cMoab = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Explosão do míssil SCUD", L"SCUD missile explosion"), {T(L"Nuke 11kt (teste)", L"Nuke 11kt (test)"), T(L"Igual à JDAM", L"Same as JDAM")}); y += 40;
 	g_cCor = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Cores", L"Colours"), {T(L"Realistas", L"Realistic"), T(L"Clássicas", L"Classic")}); y += 40;
 	g_cQual = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Qualidade", L"Quality"), {T(L"Desempenho", L"Performance"), T(L"Equilíbrio", L"Balanced"), T(L"Máxima", L"Maximum")}); y += 40;
@@ -714,16 +716,17 @@ static void build_ui()
 	g_kWind = add(W_TOG, 1, 0, X0, y, W / 2 - 8, 30, T(L"Fumaça deriva com o vento", L"Smoke drifts with the wind"));
 	g_kStock = add(W_TOG, 1, 0, X0 + W / 2 + 8, y, W / 2 - 8, 30, T(L"Substituir explosões do jogo", L"Replace stock explosions")); y += 70;
 	g_cVar = add(W_SEG, 9, ID_VRAM, X0, y, W, 34, L"", {L"", L"", L""});	// (antigo seletor global; fora de uso)
-	g_kBC = add(W_SEG, 3, ID_VRAM, X0, 376, W, 34, T(L"Compressão", L"Compression"), {T(L"Desligada", L"Off"), T(L"Metade", L"Half"), T(L"Um quarto (BC7)", L"One quarter (BC7)")});
-	g_kLazy = add(W_TOG, 3, ID_VRAM, X0, 414, W, 30, T(L"Carregar variações extras só quando usadas", L"Load extra variations only when used"));
+	g_kBC = add(W_SEG, 3, ID_VRAM, X0, 316, W, 34, T(L"Compressão", L"Compression"), {T(L"Desligada", L"Off"), T(L"Metade", L"Half"), T(L"Um quarto (BC7)", L"One quarter (BC7)")});
+	g_kLazy = add(W_TOG, 3, ID_VRAM, X0, 354, W, 30, T(L"Carregar variações extras só quando usadas", L"Load extra variations only when used"));
 	for (int i = 0; i < 8; i++)
 	{	// barra deslizante: Não, 1..5 (Mk-82 Novo Shader: Não, 1..6 = variantes 1, 2, 3, 4, 7 e 8 da rodada de testes)
-		g_cN[i] = add(W_SLD, 3, ID_VRAM, X0, 104.f + 30 * i, W, 28, L"", {T(L"Não", L"Off"), L"1", L"2", L"3", L"4", L"5"});
+		int row = i < 2 ? i : i - 2;	// Foguete e Mk-82 antigos (2 e 3) sairam do instalador na v1.2.7: ficam escondidos e sempre em 0
+		g_cN[i] = add(W_SLD, (i == 2 || i == 3) ? 99 : 3, ID_VRAM, X0, 104.f + 30 * row, W, 28, L"", {T(L"Não", L"Off"), L"1", L"2", L"3", L"4", L"5"});
 		if (i == 6) g_w[g_cN[i]].opts.push_back(L"6");
 		if (i == 7) g_w[g_cN[i]].opts.pop_back();	// Foguete Novo Shader: Não, 1..4
 	}
 	{	// limite de explosoes ao mesmo tempo: 0 a 50
-		g_sMax = add(W_SLD, 3, ID_VRAM, X0, 104.f + 30 * 8, W, 28, T(L"Limite de explosões", L"Explosion limit"));
+		g_sMax = add(W_SLD, 3, ID_VRAM, X0, 104.f + 30 * 6, W, 28, T(L"Limite de explosões", L"Explosion limit"));
 		for (int k = 0; k <= 50; k++) g_w[g_sMax].opts.push_back(std::to_wstring(k));
 	}
 	(void)LBL;
@@ -835,14 +838,26 @@ static void render(Bitmap &back)
 		spaced(g, T(L"EXPLOSÕES", L"EXPLOSIONS"), (float)X0, 80, 11.5f, C_MUT, 1.4f);
 		text(g, T(L"Valem na próxima vez que abrir o DCS.", L"They take effect next time you start DCS."), RectF((REAL)X0, CH - 62.f, W - 220, 42), 12.5f, C_MUT);
 	}
+	if (g_page == 4)	// NOVIDADES: tres fotos da versao atual em cima, notas embaixo
+	{
+		const wchar_t *cap[3] = {T(L"Rastro do SCUD", L"SCUD smoke trail"), T(L"Chama no bocal", L"Flame at the nozzle"), T(L"Nuke 11 kt em Beirute", L"11 kt nuke over Beirut")};
+		float tw = (W - 16.f) / 3.f, th = tw * 9.f / 16.f;
+		for (int i = 0; i < 3; i++)
+		{
+			float x = X0 + i * (tw + 8.f);
+			if (g_nov[i]) { g.SetInterpolationMode(InterpolationModeHighQualityBicubic); g.DrawImage(g_nov[i], RectF(x, 80.f, tw, th)); }
+			else fill_rr(g, RectF(x, 80.f, tw, th), 6, C_CARD);
+			text(g, cap[i], RectF(x, 84.f + th, tw, 18), 11.5f, C_MUT, 1);
+		}
+	}
 	if (g_page == 3)
 	{
 		spaced(g, T(L"EXPLOSÕES E VARIAÇÕES NA MEMÓRIA DE VÍDEO", L"EXPLOSIONS AND VARIATIONS IN VIDEO MEMORY"), (float)X0, 80, 11.5f, C_MUT, 1.4f);
-		fill_rr(g, RectF((REAL)X0, 450, W, 62), 12, C_CARD);
-		text(g, T(L"VRAM DO MOD", L"MOD VRAM"), RectF(X0 + 18.f, 458, 160, 18), 11.5f, C_MUT, 0, FontStyleBold);
-		text(g, g_vram_big, RectF(X0 + 18.f, 476, 200, 30), 24, C_ACC2, 0, FontStyleBold);
-		text(g, g_vram, RectF(X0 + 200.f, 458, W - 216, 48), 12.5f, C_TXT, 0, FontStyleRegular, L"Segoe UI", true);
-		text(g, g_vram_note, RectF((REAL)X0, 518, W, 36), 12, C_MUT, 0, FontStyleRegular, L"Segoe UI", true);
+		fill_rr(g, RectF((REAL)X0, 390, W, 62), 12, C_CARD);
+		text(g, T(L"VRAM DO MOD", L"MOD VRAM"), RectF(X0 + 18.f, 398, 160, 18), 11.5f, C_MUT, 0, FontStyleBold);
+		text(g, g_vram_big, RectF(X0 + 18.f, 416, 200, 30), 24, C_ACC2, 0, FontStyleBold);
+		text(g, g_vram, RectF(X0 + 200.f, 398, W - 216, 48), 12.5f, C_TXT, 0, FontStyleRegular, L"Segoe UI", true);
+		text(g, g_vram_note, RectF((REAL)X0, 458, W, 36), 12, C_MUT, 0, FontStyleRegular, L"Segoe UI", true);
 		text(g, T(L"Valem na próxima vez que abrir o DCS.", L"They take effect next time you start DCS."), RectF((REAL)X0, CH - 62.f, W - 220, 42), 12.5f, C_MUT);
 	}
 	// ---- controles
@@ -951,7 +966,7 @@ static void render(Bitmap &back)
 		text(g, T(L"clique em qualquer lugar para fechar", L"click anywhere to close"), RectF(cx, cy + 436, cw, 18), 11.5f, Color(255, 104, 111, 121), 1);
 	}
 	if (g_shot && g_page == 0) text(g, dcs_path().wstring(), RectF(X0 + 14.f, 229, X1 - X0 - 136.f, 22), 15, C_TXT);
-	if (g_shot && g_page == 4) { fill_rr(g, RectF((REAL)X0, 84, (REAL)(X1 - X0), CH - 140.f), 8, C_CARD); text(g, load_res_text(g_pt ? 108 : 109), RectF(X0 + 10.f, 92, X1 - X0 - 20.f, CH - 156.f), 13, Color(255, 190, 196, 204), 0, FontStyleRegular, L"Segoe UI", true); }
+	if (g_shot && g_page == 4) { fill_rr(g, RectF((REAL)X0, (REAL)NOV_Y, (REAL)(X1 - X0), CH - NOV_Y - 56.f), 8, C_CARD); text(g, load_res_text(g_pt ? 108 : 109), RectF(X0 + 10.f, NOV_Y + 8.f, X1 - X0 - 20.f, CH - NOV_Y - 72.f), 13, Color(255, 190, 196, 204), 0, FontStyleRegular, L"Segoe UI", true); }
 	if (g_shot && g_page == 2) { fill_rr(g, RectF((REAL)X0, 84, (REAL)(X1 - X0), CH - 140.f), 8, C_CARD); float ly = 92; for (auto &ln : g_lines) { text(g, ln, RectF(X0 + 10.f, ly, X1 - X0 - 20.f, 18), 13, Color(255, 190, 196, 204), 0, FontStyleRegular, L"Consolas"); ly += 18; } }
 }
 static void paint(HDC hdc)
@@ -1096,6 +1111,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int)
 	std::error_code ec;
 	{ HDC sdc = GetDC(nullptr); g_s = GetDeviceCaps(sdc, LOGPIXELSX) / 96.f; ReleaseDC(nullptr, sdc); }
 	for (int i = 0; i < 3; i++) g_hero[i] = load_res_img(101 + i);
+	for (int i = 0; i < 3; i++) g_nov[i] = load_res_img(110 + i);
 	g_qr = load_res_img(104); g_icDisc = load_res_img(105); g_icInsta = load_res_img(106); g_icPix = load_res_img(107);
 
 	WNDCLASSW wc = {}; wc.lpfnWndProc = wndproc; wc.hInstance = hi; wc.lpszClassName = L"NZBX"; wc.hCursor = LoadCursor(nullptr, IDC_ARROW);

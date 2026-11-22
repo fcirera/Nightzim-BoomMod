@@ -1,25 +1,55 @@
 # Nightzim BoomMod
 
-## Nightzim BoomMod X - volumetric explosions, now with VR
+## Nightzim BoomMod X - volumetric explosions for DCS World
 
-**Latest: BoomMod X v1.2 - VR support (OpenXR).** Download: https://github.com/fcirera/Nightzim-BoomMod/releases/latest
+**Latest: BoomMod X v1.2.7** - SCUD smoke trail and flame, nuclear dust skirt. Download: https://github.com/fcirera/Nightzim-BoomMod/releases/latest
 
-BoomMod X is the volumetric line of the mod. A ReShade add-on ray-marches the simulated explosion volumes on top of the game, using the scene depth, the sun and the wind, and a Lua hook triggers them from the real bombs, rockets, missiles and tank shells, in single player and multiplayer.
+*Português abaixo.*
 
-- **VR (OpenXR)** - explosions are drawn inside the headset, once per eye, with each eye's own projection. Confirmed on Meta Quest 3 through Quest Link.
-- **Targeting pod** - explosions also show up in the pod image on the MFD.
-- **Night lighting** - at night the smoke goes dark and is lit by the fire.
-- **Napalm** - the fire strip ignites from the impact end to the other, along the bomb's heading.
-- **VRAM control** - choose which explosions to load and how many variations of each, with the video memory added up as you choose; optional compression.
-- **Installer** - activate, disable or uninstall with backups; options and VRAM tabs; Portuguese and English.
+![SCUD nuclear strike on Beirut - dust skirt riding the shock wave](docs/img/nuke_dust.jpg)
 
-Requirements: DCS World (DirectX 11) and ReShade 6.x **with full add-on support** installed for `bin\DCS.exe` (DirectX 10/11/12 only; the OpenXR option of the ReShade installer is not needed, VR included).
+BoomMod X draws simulated explosions in 3D inside the game. A ReShade add-on ray-marches pre-computed explosion volumes (fluid simulations of the blast, fire and smoke) on top of the image, using the scene depth, the sun and the mission wind. A Lua hook triggers them from the real bombs, rockets, missiles and tank shells, in single player and multiplayer.
 
-Install: download the zip from the latest release, extract it whole, close DCS, run `BoomModX_Instalador.exe` and click **Install / Activate**.
+| | |
+|---|---|
+| ![SCUD smoke trail](docs/img/scud_trail.jpg) | ![SCUD flame](docs/img/scud_flame.jpg) |
+| **SCUD smoke trail (v1.2.7)** - volumetric, reddish at the nozzle, light brown and greyish brown as it ages | **Hot-gas flame (v1.2.7)** - cone from the nozzle, white core, yellow to orange, always along the flight path |
+| ![Volumetric explosions](docs/img/explosions.jpg) | ![Nuclear flash](docs/img/nuke_flash.jpg) |
+| **Volumetric explosions** - JDAM, Mk-82, rockets, air burst, napalm, tank shell | **SCUD = 11 kt nuke** - flash, lens effects, shock wave, 1.3 km mushroom |
 
-VR notes: after entering the cockpit, give it up to a minute before the first explosion so the add-on can find the game camera. The shock wave refraction is not in VR yet, and VR uses a lighter ray-march quality. Tested on one headset so far; reports from other headsets and runtimes are welcome.
+### Features
 
-More: how it works and what every file does in [BoomModX.md](BoomModX.md), update notes and credits in [CHANGELOG.md](CHANGELOG.md), sources and current test build in [`boommod-x/`](boommod-x/).
+- **Explosions:** JDAM (2000 lb, new and classic), Mk-82 (New Shader, 6 variations), rockets (New Shader, 4 variations), air burst, napalm (ignites from end to end along the bomb's heading) and tank shell. Each one is rotated/mirrored at random and drifts with the real wind.
+- **SCUD = nuclear (11 kt):** yellow-white flash, blinding glare with rays and lens effects that turn with your head, view darkened while the eye readapts, air refraction and camera shake when the shock wave arrives, a 1.3 km mushroom cloud, a dust skirt that grows with the shock wave (about 4 km) and a blast heard up to 90 km away. Options: *SCUD missile explosion = Nuke 11kt / Same as JDAM*.
+- **SCUD smoke trail and flame:** the SCUD leaves its own volumetric trail and a hot-gas flame cone instead of the game's thin line (`NightzimBoom.ini`, section `[rastro]`).
+- **Missions can request explosions:** a mission script can add `"x,y,z,type"` to the global table `nzx` (for example type 9 = nuclear).
+- **VR (OpenXR):** drawn inside the headset, once per eye (Quest Link, Virtual Desktop).
+- **Targeting pod** (explosions in the MFD image) and **night lighting** (smoke lit by the fire).
+- **VRAM control:** choose how many variations of each explosion to load, the explosion limit and BC7 compression; the installer adds up the video memory as you choose.
+- **Installer:** install / disable / uninstall with backups; Options, VRAM, Log and What's new tabs; ReShade check; update check; Portuguese and English.
+
+![Installer - What's new tab](docs/img/installer.jpg)
+
+### Requirements and install
+
+- DCS World (DirectX 11) and **ReShade 6.x with full add-on support** installed for `bin\DCS.exe` (DirectX 10/11/12; the OpenXR option of the ReShade installer is not needed, VR included).
+- Download the zip from the [latest release](https://github.com/fcirera/Nightzim-BoomMod/releases/latest), extract it whole, close DCS, run `BoomModX_Instalador.exe` and click **Install / Activate**. To update, run the new installer over the old install (your `NightzimBoom.ini` is kept).
+- The visual effects run on your PC, so you see them on any server; players without the mod see the stock explosions.
+
+VR notes: after entering the cockpit, give it up to a minute before the first explosion so the add-on can find the game camera. VR uses a lighter ray-march quality.
+
+More: how it works and what every file does in [BoomModX.md](BoomModX.md), every update in [CHANGELOG.md](CHANGELOG.md), sources and current build in [`boommod-x/`](boommod-x/).
+
+### Português
+
+BoomMod X desenha explosões simuladas em 3D dentro do jogo: um add-on do ReShade percorre volumes de explosão pré-calculados (simulação de fluido da onda, do fogo e da fumaça) por cima da imagem, usando a profundidade da cena, o sol e o vento da missão, e um hook Lua dispara as explosões a partir das bombas, foguetes, mísseis e tiros de tanque reais, no single player e no multiplayer.
+
+- **v1.2.7:** rastro de fumaça volumétrico próprio do SCUD e chama em cone de gás quente saindo do bocal; saia de poeira nuclear que cresce com a onda de choque (~4 km); opções do instalador enxutas; aba NOVIDADES no instalador; correção das atualizações.
+- **SCUD nuclear (11 kt):** clarão, efeitos de lente que giram com a cabeça, vista se readaptando, refração do ar e tranco na chegada da onda, cogumelo de 1,3 km e estrondo ouvido a 90 km.
+- **Explosões:** JDAM, Mk-82 e foguete (Novo Shader), explosão aérea, napalm e tiro de tanque, girando ao acaso e levadas pelo vento real.
+- **VR (OpenXR), pod de mira, iluminação noturna, controle de VRAM** e instalador com backup, em português e inglês.
+
+Requisitos: DCS World (DirectX 11) e **ReShade 6.x "with full add-on support"** no `bin\DCS.exe`. Instalação: baixe o zip do [último release](https://github.com/fcirera/Nightzim-BoomMod/releases/latest), extraia inteiro, feche o DCS, abra o `BoomModX_Instalador.exe` e clique em **INSTALAR / ATIVAR**.
 
 ---
 
@@ -101,6 +131,6 @@ Questions and suggestions are welcome. Discord ID: `999680611314831390`
 
 ## Status
 
-Version 3.2c, work in progress. This repository contains the mod files and the installer. The simulation engine and the `.ffx` exporter are not published here.
+Classic line: version 3.2c. BoomMod X: v1.2.7. This repository contains the mod files and the installers. The simulation engine and the `.ffx` exporter are not published here.
 
 Not affiliated with Eagle Dynamics. DCS World is a trademark of its owner.

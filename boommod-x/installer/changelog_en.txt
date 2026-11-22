@@ -1,6 +1,8 @@
 Nightzim BoomMod X - what's new
 (newest first; full history: github.com/fcirera/Nightzim-BoomMod/blob/main/CHANGELOG.md)
 
+• Installer options cleaned up (v1.2.7): the "Nuke 11kt (test)" choice was removed from the JDAM explosion (the nuke is now only on the SCUD), and the old Rocket and old Mk-82 rows were removed from the VRAM tab (the New Shader versions replace them).
+
 • Installer fix (v1.2.7): updates did not finish. When updating over an existing install on the same drive, copying a file over the old one failed and the update stopped half way (the error lines with accents were also dropped from the log). Files are now replaced with the Windows copy/move calls and the log is written in UTF-8.
 
 • Changelog in the installer (v1.2.7): new "WHAT'S NEW" tab with these notes.
