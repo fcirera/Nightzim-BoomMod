@@ -539,7 +539,7 @@ static void refresh_status()
 
 // ---------------------------------------------------------------- janela (interface propria, desenhada com GDI+)
 enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_TAB4, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH, ID_COMPAT };
-static const wchar_t *APP_VER = L"1.2.8"; static const UINT WM_UPD = WM_APP + 1;
+static const wchar_t *APP_VER = L"1.2.9"; static const UINT WM_UPD = WM_APP + 1;
 static int g_upd = 0; static std::wstring g_latest; static int g_bUpd = -1;	// g_upd: 0 verificando, 1 em dia, 2 ha versao nova, -1 sem resposta
 static bool g_pix = false; static Gdiplus::Bitmap *g_qr = nullptr, *g_icDisc = nullptr, *g_icInsta = nullptr, *g_icPix = nullptr;	// icones fornecidos pelo autor
 static const wchar_t *PIX_KEY = L"f5124246-e867-42ce-a16b-d139017560a5";

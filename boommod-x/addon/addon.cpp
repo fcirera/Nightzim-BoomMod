@@ -677,14 +677,20 @@ static void depth_end_frame()
 			for (auto &kv : g_dstat)
 			{
 				const DStat &d = kv.second;
-				if (eye_of(kv.first) || !d.has_rt || d.rw != ew || d.rh != eh) continue;
+				if (eye_of(kv.first) || !d.has_rt || !ew || !eh) continue;
 				if (d.rfmt != 28 && d.rfmt != 29 && d.rfmt != 87 && d.rfmt != 91) continue;
-				fin.push_back({d.draws, kv.first});
+				// com upscaler (OptiScaler/DLSS/FSR no VR) o olho e desenhado menor e a imagem final do olho e maior:
+				// aceita a mesma proporcao (+-2%) de 1x a 3x o tamanho da profundidade do olho; o tamanho exato tem prioridade
+				bool exact = d.rw == ew && d.rh == eh;
+				float ar = (float)d.rw / std::max(1u, d.rh), ae = (float)ew / eh, sc = (float)d.rw / ew;
+				if (!exact && (fabsf(ar / ae - 1.f) > 0.02f || sc < 1.f || sc > 3.f)) continue;
+				fin.push_back({d.draws + (exact ? 0x40000000u : 0u), kv.first});
 			}
 			std::sort(fin.begin(), fin.end(), [](const std::pair<uint32_t, ID3D11Resource *> &a, const std::pair<uint32_t, ID3D11Resource *> &b) { return a.first > b.first; });
 			for (size_t i = 0; i < fin.size() && i < 2; i++) g_final_dsv[i] = fin[i].second;
-			static int told = 0;
-			if (cfg.vr_log && told < 3 && (fin.size() != 2 || told == 0)) { told++; logf("VR: %zu passada(s) final(is) candidata(s) (esperado 2)", fin.size()); }
+			static int told = 0; static size_t lastn = 99;
+			if (cfg.vr_log && fin.size() != lastn && told < 20) { told++; lastn = fin.size(); UINT fw = 0, fh = 0; if (!fin.empty()) { auto it = g_dstat.find(fin[0].second); if (it != g_dstat.end()) { fw = it->second.rw; fh = it->second.rh; } }
+				logf("VR: %zu passada(s) final(is) candidata(s) (esperado 2); olho %ux%u, imagem final %ux%u", fin.size(), ew, eh, fw, fh); }
 		}
 		for (auto &e : g_eye) { e.order = -1; e.have_scene = false; e.copied = 0; }
 		g_eye_order_n = 0; g_final_n = 0; g_final_done[0] = g_final_done[1] = false;
@@ -1471,6 +1477,8 @@ static void draw_plume(CB &cb, const Cam &cam, const double *fwd, const double *
 	static std::vector<float> buf(4 * (7 + 2 * PL_MAXP));
 	PlFlame F;
 	int n = plume_build(cam, buf.data() + 28, F);
+	{ static DWORD tl[2] = {0, 0}; int m = g_vr ? 1 : 0;
+	  if (GetTickCount() - tl[m] > 10000) { tl[m] = GetTickCount(); logf("rastro de missil: desenhado (%s) %d pontos, chama %d, alvo %.0fx%.0f, profundidade %s", m ? "VR" : "monitor", n, (int)F.on, vp.Width, vp.Height, depth ? "sim" : "nao"); } }
 	if (n < 2) return;
 	auto G3 = [](const double *v, float *o) { o[0] = (float)v[0]; o[1] = (float)v[2]; o[2] = (float)v[1]; };
 	G3(fwd, cb.camF); G3(right, cb.camR); G3(up, cb.camU);
