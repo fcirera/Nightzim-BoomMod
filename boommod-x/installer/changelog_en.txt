@@ -86,4 +86,4 @@ Nightzim BoomMod X - what's new
 
 • Dust skirt (preview): a separate dust layer raised by the shock wave running along the ground, on top of the existing explosions. Offline preview only, not in the mod yet.
 
-• Blender: nightzim_boom add-on 0.2.0 opens the mod's .nzv volumes as animated OpenVDB volumes.
+• Blender: nightzim_boom add-on 0.2.0 opens the mod's .nzv volumes as animated OpenVDB volumes.

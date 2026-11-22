@@ -86,4 +86,4 @@ Nightzim BoomMod X - novidades
 
 • Saia de poeira (prévia): camada separada de poeira levantada pela onda de choque rente ao chão, por cima das explosões existentes. Só em prévia offline, ainda fora do mod.
 
-• Blender: add-on nightzim_boom 0.2.0 abre os volumes .nzv do mod como volumes OpenVDB animados.
+• Blender: add-on nightzim_boom 0.2.0 abre os volumes .nzv do mod como volumes OpenVDB animados.
