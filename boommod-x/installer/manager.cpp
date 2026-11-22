@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <winhttp.h>
 #include <shlobj.h>
+#include <commdlg.h>
 #include <shellapi.h>
 #include <bcrypt.h>
 #include <tlhelp32.h>
@@ -216,11 +217,13 @@ static void save_man(const std::map<std::wstring, Man> &m)
 	for (auto &kv : m) f << kv.first << L"|" << kv.second.dst << L"|" << kv.second.sha << L"|" << (kv.second.bk ? L"1" : L"0") << L"\n";
 }
 
+#include "compat.inc"
 // ---------------------------------------------------------------- ReShade
 static void check_reshade(const fs::path &dcs)
 {
 	std::error_code ec; fs::path bin = dcs / L"bin", rs;
-	for (const wchar_t *n : {L"dxgi.dll", L"d3d11.dll"})
+	if (fs::exists(dcs / L"bin-mt" / L"DCS.exe", ec) && !g_compat_bin.empty()) bin = g_compat_bin;
+	for (const wchar_t *n : {L"dxgi.dll", L"d3d11.dll", L"ReShade64.dll"})
 	{
 		fs::path p = bin / n; if (!fs::exists(p, ec)) continue;
 		DWORD hnd, sz = GetFileVersionInfoSizeW(p.c_str(), &hnd); std::vector<char> b(sz);
@@ -473,6 +476,7 @@ static bool activate()
 	if (!fs::exists(ini_path(), ec)) {}
 	ini_set(L"instalador", L"substituir", rep ? L"1" : L"0");
 	log(T(L"ATIVADO: ", L"ACTIVE: ") + std::to_wstring(n) + T(L" arquivos instalados e conferidos (SHA-256).", L" files installed and verified (SHA-256)."));
+	compat_check(dcs, 0);
 	check_reshade(dcs);
 	return true;
 }
@@ -482,6 +486,7 @@ static bool deactivate(bool remove_all)
 {
 	fs::path dcs = dcs_path();
 	if (dcs_running()) { log(T(L"ERRO: feche o DCS antes.", L"ERROR: close DCS first.")); return false; }
+	if (remove_all) { compat_check(dcs, 1); compat_uninstall(); }
 	auto man = load_man(); std::error_code ec;
 	if (man.empty()) { log(T(L"Nada instalado (manifesto vazio).", L"Nothing installed (empty manifest).")); return true; }
 	for (auto it = man.begin(); it != man.end();)
@@ -533,8 +538,8 @@ static void refresh_status()
 }
 
 // ---------------------------------------------------------------- janela (interface propria, desenhada com GDI+)
-enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_TAB4, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH };
-static const wchar_t *APP_VER = L"1.2.7"; static const UINT WM_UPD = WM_APP + 1;
+enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_TAB4, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH, ID_COMPAT };
+static const wchar_t *APP_VER = L"1.2.8"; static const UINT WM_UPD = WM_APP + 1;
 static int g_upd = 0; static std::wstring g_latest; static int g_bUpd = -1;	// g_upd: 0 verificando, 1 em dia, 2 ha versao nova, -1 sem resposta
 static bool g_pix = false; static Gdiplus::Bitmap *g_qr = nullptr, *g_icDisc = nullptr, *g_icInsta = nullptr, *g_icPix = nullptr;	// icones fornecidos pelo autor
 static const wchar_t *PIX_KEY = L"f5124246-e867-42ce-a16b-d139017560a5";
@@ -751,7 +756,8 @@ static void build_ui()
 	add(W_BTN, -1, ID_LANG, X1 - 52, 28, 52, 28, g_pt ? L"PT | en" : L"pt | EN", {}, 3);
 	// --- instalacao
 	add(W_BTN, 0, ID_BROWSE, X1 - 104, 224, 96, 32, T(L"Procurar", L"Browse"), {}, 2);
-	add(W_BTN, 0, ID_ON, X0, 284, W, 56, T(L"INSTALAR  /  ATIVAR", L"INSTALL  /  ACTIVATE"), {}, 1);
+	add(W_BTN, 0, ID_ON, X0, 284, W - 212, 56, T(L"INSTALAR  /  ATIVAR", L"INSTALL  /  ACTIVATE"), {}, 1);
+	add(W_BTN, 0, ID_COMPAT, X1 - 200, 284, 200, 56, T(L"Verificar compatibilidade", L"Check compatibility"), {}, 0);
 	float bw = (W - 24) / 3;
 	add(W_BTN, 0, ID_OFF, X0, 352, bw, 40, T(L"Desativar", L"Disable"), {}, 0);
 	add(W_BTN, 0, ID_DEL, X0 + bw + 12, 352, bw, 40, T(L"Desinstalar", L"Uninstall"), {}, 0);
@@ -1032,6 +1038,7 @@ static void command(int id)
 	case ID_LANG: g_pt = !g_pt; build_ui(); refresh_status(); update_vram_label(); break;
 	case ID_BROWSE: if (!g_busy) browse(); break;
 	case ID_ON: if (g_busy) break; set_busy(true); if (activate()) apply_options(); set_busy(false); refresh_status(); break;
+	case ID_COMPAT: if (g_busy) break; set_busy(true); g_compat_bin.clear(); compat_check(dcs_path(), 2); check_reshade(dcs_path()); set_busy(false); refresh_status(); break;
 	case ID_OFF: if (g_busy) break; set_busy(true); deactivate(false); set_busy(false); refresh_status(); break;
 	case ID_DEL:
 		if (g_busy) break;

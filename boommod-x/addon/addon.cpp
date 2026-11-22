@@ -508,7 +508,12 @@ static bool tex_matches_screen(ID3D11Resource *r)
 	ID3D11Texture2D *t = nullptr;
 	if (!r || FAILED(r->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&t))) return false;
 	D3D11_TEXTURE2D_DESC d; t->GetDesc(&d); t->Release();
-	return d.Width == g_bb_w && d.Height == g_bb_h;
+	if (d.Width == g_bb_w && d.Height == g_bb_h) return true;
+	// upscaler (DLSS/FSR/XeSS, OptiScaler): o jogo desenha abaixo da resolucao de saida, a profundidade e menor que a tela.
+	// Vale o mesmo formato de tela (proporcao) entre 1/3 e 1x da largura; as coordenadas ja sao escaladas no shader (uv * tamanho)
+	if (!g_bb_w || !g_bb_h || !d.Width || !d.Height || d.Width > g_bb_w || d.Width * 3 < g_bb_w) return false;
+	float ar = (float)d.Width / d.Height, br = (float)g_bb_w / g_bb_h;
+	return fabsf(ar / br - 1.f) < 0.02f;
 }
 
 static void on_bind_rt_ds(command_list *cmd, uint32_t count, const resource_view *rtvs, resource_view dsv)
@@ -645,6 +650,11 @@ static void depth_end_frame()
 			if (SUCCEEDED(kv.first->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&t))) { t->GetDesc(&td); t->Release(); }
 			if (td.Width < 800 || td.Height < 800) continue;
 			cds.push_back({kv.first, d.draws, td.Width, td.Height});
+		}
+		{	// olho de oculos e quase quadrado (Quest 3: 2496x2688); se houver um assim, descarta alvos em formato de tela larga
+			// (espelho/janela do PC, desenho reduzido do upscaler do OptiScaler), que tem outra camera e saem girados
+			bool sq = false; for (auto &c : cds) if (c.w < c.h * 1.2f) sq = true;
+			if (sq) cds.erase(std::remove_if(cds.begin(), cds.end(), [](const Cd &c) { return c.w > c.h * 1.35f; }), cds.end());
 		}
 		std::sort(cds.begin(), cds.end(), [](const Cd &a, const Cd &b) { return a.draws > b.draws; });
 		for (size_t i = 0; i < cds.size() && i < 2; i++)
@@ -1157,11 +1167,7 @@ static void setup_job_cb(CB &cb, Inst &I, Volume &vol, const Cam &cam, const dou
 	cb.wind[3] = TYPE_GROUND[I.type] ? cfg.wind_shear_m : 0.f;			// cisalhamento: perto do chao anda menos
 	cb.camO[3] = std::min(cfg.step_m, vol.dx * 0.6f);
 	cb.grid[0] = vol.nx * vol.dx; cb.grid[1] = vol.ny * vol.dx; cb.grid[2] = vol.nz * vol.dx; cb.grid[3] = w;
-	{	// volumes grandes (nuclear): o passo cresce para os passos disponiveis atravessarem a caixa inteira; senao o raio acaba no ar vazio antes de chegar na nuvem
-		float diag = sqrtf(cb.grid[0] * cb.grid[0] + cb.grid[1] * cb.grid[1] + cb.grid[2] * cb.grid[2]);
-		float need = diag / std::max(60.f, cb.misc[0] * 0.95f);
-		if (cb.camO[3] < need) cb.camO[3] = need;
-	}
+	// volumes grandes: o shader aumenta o passo por raio quando o raio nao cabe nos passos disponiveis (v1.2.8)
 	cb.scales[0] = vol.mx[0]; cb.scales[1] = vol.mx[1]; cb.scales[2] = vol.mx[2]; cb.scales[3] = cfg.opacity * J.fade;
 	cb.scales2[0] = vol.mx[3]; cb.scales2[1] = vol.mx[4];
 	cb.detail2[2] = TYPE_GROUND[I.type] ? 1.f : 0.f;	// chao: sem desvanecer a face de baixo
@@ -1899,7 +1905,7 @@ static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *
 		double dx = cam.p[0] - I.p[0], dy = cam.p[1] - I.p[1], dz = cam.p[2] - I.p[2];
 		jobs.push_back({k, t, fade, dx * dx + dy * dy + dz * dz + (I.type == 10 ? 1e14 : 0.0)});	// poeira da nuke sempre por baixo (desenhada antes do cogumelo)
 	}
-	if (jobs.empty()) return;
+	if (jobs.empty() && g_pl.empty()) return;	// rastro de missil sozinho no ar tambem e desenhado no VR
 	std::sort(jobs.begin(), jobs.end(), [](const PJ &a, const PJ &b) { return a.d2 > b.d2; });
 
 	ID3DDeviceContextState *prev = nullptr;
@@ -1907,6 +1913,35 @@ static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *
 	if (e.have_scene) { copy_depth_to(e.cock, ctx, e.dsv); mask = cfg.cockpit_mask && e.cock.valid && e.cock.samples == e.scene.samples; }
 	else copy_depth_to(e.scene, ctx, e.dsv);
 	// raio do pixel = A + ndc.x * B + ndc.y * C: vai nos campos da camera (frente = A, direita = B, cima = C, escalas 1)
+	// conferencia com a camera do Lua: se os eixos achados nos buffers do jogo forem uma troca de eixos da camera do Lua
+	// (ex.: matriz de uma face de mapa cubico, girada 90 graus), corrige pela permutacao e pede para reaprender a matriz
+	{
+		float fL[3], uL[3], rL[3]; float la = vlen3(vp.A), lb = vlen3(vp.B), lc = vlen3(vp.C);
+		if (la > 1e-6f && lb > 1e-6f && lc > 1e-6f)
+		{
+			for (int k = 0; k < 3; k++) { fL[k] = vp.A[k] / la; rL[k] = vp.B[k] / lb; uL[k] = vp.C[k] / lc; }
+			const double *T[3] = {cam.x, cam.y, cam.z}; const float *L[3] = {fL, uL, rL};
+			float R[3][3]; bool perm = true, ident = true;
+			for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++)
+			{
+				R[i][j] = (float)(T[i][0] * L[j][0] + T[i][1] * L[j][1] + T[i][2] * L[j][2]);	// componente do eixo j aprendido no eixo i do Lua
+				float a = fabsf(R[i][j]); if (a > 0.35f && a < 0.85f) perm = false;
+				if ((i == j && R[i][j] < 0.85f) || (i != j && a > 0.35f)) ident = false;
+			}
+			if (perm && !ident)
+			{
+				static DWORD tw = 0;
+				if (GetTickCount() - tw > 10000) { tw = GetTickCount(); logf("VR: eixos da camera trocados em relacao ao Lua (matriz girada); corrigindo e reaprendendo"); }
+				g_view_weak = true;
+				float mA[3], mB[3], mC[3];	// v' = soma_j sinal(R) * eixo_Lua... : leva cada vetor do referencial aprendido para o do Lua
+				auto fix = [&](const float *v, float *o) {
+					float c[3] = {dotf(v, fL), dotf(v, uL), dotf(v, rL)};	// coordenadas no referencial aprendido
+					for (int k = 0; k < 3; k++) o[k] = (float)(c[0] * T[0][k] + c[1] * T[1][k] + c[2] * T[2][k]); };
+				fix(vp.A, mA); fix(vp.B, mB); fix(vp.C, mC);
+				memcpy(vp.A, mA, 12); memcpy(vp.B, mB, 12); memcpy(vp.C, mC, 12);
+			}
+		}
+	}
 	for (int i = 0; i < 3; i++) { cam.x[i] = vp.A[i]; cam.z[i] = vp.B[i]; cam.y[i] = vp.C[i]; }
 	float nearm = vp.nearv > 0.f ? vp.nearv : 0.02f;
 	CB cb = {};

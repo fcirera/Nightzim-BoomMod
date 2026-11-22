@@ -1,6 +1,14 @@
 Nightzim BoomMod X - what's new
 (newest first; full history: github.com/fcirera/Nightzim-BoomMod/blob/main/CHANGELOG.md)
 
+• OptiScaler compatibility (v1.2.8): OptiScaler (FSR 4 on AMD cards) also installs as dxgi.dll and used to overwrite ReShade (or the other way round). The installer now looks for proxy DLLs in bin and bin-mt (dxgi, d3d11, d3d12, dinput8, winmm, version, dbghelp, wininet, winhttp, ReShade64), tells ReShade, OptiScaler and unknown files apart by their version info, and picks bin or bin-mt from your DCS shortcuts (or asks). OptiScaler as dxgi.dll: ReShade goes in as ReShade64.dll and only the LoadReshade key of OptiScaler.ini is set to true. ReShade as dxgi.dll: the new Check compatibility button offers the "OptiScaler compatible mode" (backup in bin\_nightzim_backup\<date>, ReShade renamed to ReShade64.dll, OptiScaler copied from the folder you pick, LoadReshade=true). Unknown dxgi.dll: never overwritten; ReShade can go in as d3d11.dll instead. Uninstall removes only what the installer placed (JSON manifest with SHA-256) and restores the backup. The installer does not include ReShade: it uses your ReShade64.dll (from the ReShade setup or another install).
+
+• Upscalers (v1.2.8): with DLSS/FSR/XeSS (OptiScaler) the game renders below the output resolution and the depth buffer is smaller than the screen. The add-on now accepts that depth buffer (same aspect ratio, 1/3 to 1x the width) and scales the coordinates. Before, it found no depth (explosions showing through the terrain) and in monitor mode the reduced depth could be taken for a VR eye.
+
+• VR (v1.2.8): the SCUD trail is drawn in the headset also when there is no explosion on screen; wide-screen targets (desktop mirror, upscaler) are no longer taken for an eye, which drew the nuke rotated 90 degrees; and if the camera axes found in the game buffers are a swap of DCS's camera axes, they are corrected and learned again.
+
+• Nuclear dust without stripes (v1.2.8): the ray step is now chosen per ray (fine, growing only when that ray needs it) and the dust data is smoothed between its 12.5 m layers; the horizontal stripes are gone. Applies to every volume.
+
 • Installer options cleaned up (v1.2.7): the "Nuke 11kt (test)" choice was removed from the JDAM explosion (the nuke is now only on the SCUD), and the old Rocket and old Mk-82 rows were removed from the VRAM tab (the New Shader versions replace them).
 
 • Installer fix (v1.2.7): updates did not finish. When updating over an existing install on the same drive, copying a file over the old one failed and the update stopped half way (the error lines with accents were also dropped from the log). Files are now replaced with the Windows copy/move calls and the log is written in UTF-8.

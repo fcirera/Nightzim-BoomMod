@@ -187,7 +187,10 @@ float4 ps_main(VSOut i) : SV_Target
 	t1 = min(t1, zmax);
 	if (t1 <= t0) discard;
 
-	float dt = camO.w / dl;
+	// passo por raio: o fino de sempre, e so cresce quando ESTE raio nao cabe nos passos disponiveis (antes o passo crescia
+	// pela diagonal da caixa inteira: na poeira nuclear, larga e baixa, isso dava passos de ~30 m e listras horizontais)
+	int nmx = max((int)misc.x - 4, 16);
+	float dt = max(camO.w / dl, (t1 - t0) / nmx);
 	float jit = frac(sin(dot(i.pos.xy, float2(12.9898, 78.233))) * 43758.5453);
 	float t = t0 + dt * jit;
 	float w = grid.w;
