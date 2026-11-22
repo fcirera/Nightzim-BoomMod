@@ -6,6 +6,7 @@
 #define NZ_SHM_NAME "Local\\NightzimBoomV1"
 #define NZ_SHM_VERSION 9
 #define NZ_RING 32
+#define NZ_TRK 4
 #define NZ_PROBE_NX 9
 #define NZ_PROBE_NY 7
 #define NZ_PROBE_N (NZ_PROBE_NX * NZ_PROBE_NY)
@@ -51,5 +52,8 @@ struct NzShared
 	volatile LONG opt_seq;
 	int32_t opt_jdam;			// 1 = nova (v2), 2 = classica (v1)
 	float opt_realism, opt_shock;
+	// misseis acompanhados em voo para o rastro de fumaca proprio (SCUD): escrito pelo Lua a cada quadro
+	struct { double p[3]; double t; float wx, wz; int32_t id; int32_t on; } trk[NZ_TRK];
+	volatile LONG trk_seq;
 };
 #pragma pack(pop)

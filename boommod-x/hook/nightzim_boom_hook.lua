@@ -273,12 +273,19 @@ local function ballistic_step(t)
 			else
 				cb.bal[id] = {p = {x = o.Position.x, y = o.Position.y, z = o.Position.z}, t = t, name = o.Name}
 				L(string.format("acompanhando %s (id %s) a %.0f m de altura", tostring(o.Name), tostring(id), o.Position.y))
+				e = cb.bal[id]
+				e.trail = nz.track and classify_name(o.Name) == 9	-- SCUD: rastro de fumaca proprio
+			end
+			if e.trail then
+				if not e.wt or t - e.wt > 2 then e.wt = t; e.wx, e.wz = wind_at(o.Position.x, o.Position.y, o.Position.z) end
+				nz.track(tonumber(id) or 0, o.Position.x, o.Position.y, o.Position.z, t, e.wx or 0, e.wz or 0)
 			end
 		end
 	end
 	for id, e in pairs(cb.bal) do
 		if not seen[id] then
 			cb.bal[id] = nil
+			if e.trail then nz.track_end(tonumber(id) or 0) end
 			local v = e.v or {x = 0, y = 0, z = 0}
 			local gap = t - e.t						-- tempo entre a ultima posicao vista e o sumico
 			local ty = classify_name(e.name)

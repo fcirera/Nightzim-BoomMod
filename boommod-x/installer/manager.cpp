@@ -30,7 +30,7 @@ namespace Gdiplus { using std::min; using std::max; }
 namespace fs = std::filesystem;
 
 static const wchar_t *APP = L"Nightzim BoomMod X";
-static HWND g_wnd, g_path, g_log;
+static HWND g_wnd, g_path, g_log, g_chg;	// g_chg: notas de atualizacao (aba NOVIDADES)
 // controles desenhados por nos (botao, chave liga/desliga, seletor segmentado, aba)
 enum { W_BTN, W_TOG, W_SEG, W_TAB, W_SLD };	// W_SLD: barra deslizante (value 0..opts.size()-1)
 struct Wd { int type = 0, page = 0, id = 0, value = 0, style = 0; Gdiplus::RectF r; std::wstring text; std::vector<std::wstring> opts; };
@@ -56,11 +56,39 @@ static void log(const std::wstring &s)
 	SendMessageW(g_log, EM_SETSEL, n, n);
 	std::wstring t = s + L"\r\n";
 	SendMessageW(g_log, EM_REPLACESEL, FALSE, (LPARAM)t.c_str());
-	std::wofstream f(g_root / L"instalador.log", std::ios::app);
-	if (f) f << s << L"\n";
+	{	// UTF-8: com o wofstream padrao, linhas com acento (inclusive mensagens de erro do Windows) sumiam do arquivo
+		int nb = WideCharToMultiByte(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0, nullptr, nullptr);
+		std::string u(nb, '\0'); WideCharToMultiByte(CP_UTF8, 0, s.c_str(), (int)s.size(), u.data(), nb, nullptr, nullptr);
+		std::ofstream f(g_root / L"instalador.log", std::ios::app | std::ios::binary);
+		if (f) f << u << "\r\n";
+	}
 	g_lines.push_back(s); if (g_lines.size() > 200) g_lines.erase(g_lines.begin());
 	if (g_wnd) { InvalidateRect(g_wnd, nullptr, FALSE); UpdateWindow(g_wnd); }
 	MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }	// janela continua respondendo
+}
+
+
+// Copia/move pelo Windows. O std::filesystem::copy_file do MinGW recusa sobrescrever ("File exists") quando origem e destino
+// estao no MESMO disco (ele compara so o numero do disco, porque no Windows nao ha inode): o hook e a nzboom.dll no Saved Games
+// nunca eram atualizados quando o instalador rodava do C:, e a instalacao parava ali (sem ffx nem manifesto).
+static void copy_over(const fs::path &a, const fs::path &b, std::error_code &ec)
+{
+	ec.clear();
+	DWORD at = GetFileAttributesW(b.c_str());
+	if (at != INVALID_FILE_ATTRIBUTES && (at & FILE_ATTRIBUTE_READONLY)) SetFileAttributesW(b.c_str(), at & ~FILE_ATTRIBUTE_READONLY);
+	if (!CopyFileW(a.c_str(), b.c_str(), FALSE)) ec = std::error_code((int)GetLastError(), std::system_category());
+}
+static void move_over(const fs::path &a, const fs::path &b, std::error_code &ec)
+{
+	ec.clear();
+	if (!MoveFileExW(a.c_str(), b.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) ec = std::error_code((int)GetLastError(), std::system_category());
+}
+static std::wstring errw(const std::error_code &ec)
+{
+	std::string m = ec.message();
+	int n = MultiByteToWideChar(CP_ACP, 0, m.c_str(), (int)m.size(), nullptr, 0);
+	std::wstring w(n, L'\0'); MultiByteToWideChar(CP_ACP, 0, m.c_str(), (int)m.size(), w.data(), n);
+	return w + L" (" + std::to_wstring(ec.value()) + L")";
 }
 
 static std::wstring sha256(const fs::path &p)
@@ -299,7 +327,7 @@ static void update_vram_label()
 			row += m; nv++; if (v == 0) ini += m;
 		}
 		if (i == 0 && n > 0) { double m = mb(L"jdam_v1.nzv"); if (m > 0) { row += m; ini += m; nv++; } }
-		if (i == 0 && (sel(g_cJdam) == 2 || sel(g_cMoab) == 0)) { double m = mb(L"nuke.nzv"); if (m > 0) { row += m; ini += m; nv++; } }	// bomba nuclear no lugar da JDAM	// JDAM classica acompanha a JDAM
+		if (i == 0 && (sel(g_cJdam) == 2 || sel(g_cMoab) == 0)) { double m = mb(L"nuke.nzv") + mb(L"nuke_dust.nzv"); if (m > 0) { row += m; ini += m; nv++; } }	// bomba nuclear no lugar da JDAM	// JDAM classica acompanha a JDAM
 		if (n == 0 && i < 6) algum_off = true;
 		tot += row;
 		wchar_t b[128];
@@ -349,7 +377,7 @@ static void restore_ffx_from_backup()
 	{
 		if (kv.first.rfind(L"ffx\\", 0) != 0) continue;
 		fs::path b = g_root / L"backup" / kv.first;
-		if (kv.second.bk && fs::exists(b, ec)) { fs::copy_file(b, kv.second.dst, fs::copy_options::overwrite_existing, ec); log(T(L"original do jogo de volta: ", L"stock file restored: ") + kv.first); }
+		if (kv.second.bk && fs::exists(b, ec)) { copy_over(b, kv.second.dst, ec); log(T(L"original do jogo de volta: ", L"stock file restored: ") + kv.first); }
 	}
 }
 
@@ -417,7 +445,7 @@ static bool activate()
 		if (!bk && it.ffx && cur == nw && !legacy_backup(it.dst.filename()).empty())
 		{
 			fs::path b = bkdir / it.rel; fs::create_directories(b.parent_path(), ec);
-			fs::copy_file(legacy_backup(it.dst.filename()), b, fs::copy_options::overwrite_existing, ec);
+			copy_over(legacy_backup(it.dst.filename()), b, ec);
 			std::wofstream(fs::path(b.wstring() + L".sha256")) << sha256(b);
 			bk = true; log(T(L"backup (de versao anterior): ", L"backup (from a previous version): ") + it.rel);
 		}
@@ -426,15 +454,15 @@ static bool activate()
 		{
 			fs::path b = bkdir / it.rel; fs::create_directories(b.parent_path(), ec);
 			fs::path leg = it.ffx ? legacy_backup(it.dst.filename()) : fs::path();
-			fs::copy_file(leg.empty() ? it.dst : leg, b, fs::copy_options::overwrite_existing, ec);
-			if (ec) { log(T(L"ERRO no backup de ", L"ERROR backing up ") + it.dst.wstring() + L": " + std::wstring(ec.message().begin(), ec.message().end())); return false; }
+			copy_over(leg.empty() ? it.dst : leg, b, ec);
+			if (ec) { log(T(L"ERRO no backup de ", L"ERROR backing up ") + it.dst.wstring() + L": " + errw(ec)); return false; }
 			std::wofstream(fs::path(b.wstring() + L".sha256")) << sha256(b);
 			bk = true; log(T(L"backup: ", L"backup: ") + it.rel);
 		}
 		fs::create_directories(it.dst.parent_path(), ec);
 		if (fs::file_size(it.src, ec) > 20u * 1024 * 1024) log(T(L"copiando ", L"copying ") + it.dst.filename().wstring() + L"...");
-		fs::copy_file(it.src, it.dst, fs::copy_options::overwrite_existing, ec);
-		if (ec) { log(T(L"ERRO copiando ", L"ERROR copying ") + it.dst.wstring() + T(L" (rode como administrador?): ", L" (run as administrator?): ") + std::wstring(ec.message().begin(), ec.message().end())); return false; }
+		copy_over(it.src, it.dst, ec);
+		if (ec) { log(T(L"ERRO copiando ", L"ERROR copying ") + it.dst.wstring() + T(L" (rode como administrador?): ", L" (run as administrator?): ") + errw(ec)); return false; }
 		if (sha256(it.dst) != nw) { log(T(L"ERRO: verificacao falhou em ", L"ERROR: verification failed for ") + it.dst.wstring()); return false; }
 		man[it.rel] = {it.dst.wstring(), nw, bk};
 		n++;
@@ -463,7 +491,7 @@ static bool deactivate(bool remove_all)
 		{
 			std::wifstream hf(fs::path(b.wstring() + L".sha256")); std::wstring hs; hf >> hs;
 			if (!hs.empty() && sha256(b) != hs) { log(T(L"ERRO: o backup de ", L"ERROR: the backup of ") + it->first + T(L" nao confere - parei", L" does not match - stopped")); return false; }
-			fs::copy_file(b, dst, fs::copy_options::overwrite_existing, ec);
+			copy_over(b, dst, ec);
 			log(T(L"restaurado: ", L"restored: ") + it->first);
 			if (remove_all) { fs::remove(b, ec); fs::remove(b.wstring() + L".sha256", ec); }
 		}
@@ -473,7 +501,7 @@ static bool deactivate(bool remove_all)
 		}
 		else if (toggle && fs::exists(dst, ec))
 		{
-			fs::path off = dst; off += L".off"; fs::rename(dst, off, ec); log(T(L"desligado: ", L"disabled: ") + it->first);
+			fs::path off = dst; off += L".off"; move_over(dst, off, ec); log(T(L"desligado: ", L"disabled: ") + it->first);
 		}
 		else if (it->first.rfind(L"ffx\\", 0) == 0)
 		{
@@ -503,8 +531,8 @@ static void refresh_status()
 }
 
 // ---------------------------------------------------------------- janela (interface propria, desenhada com GDI+)
-enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH };
-static const wchar_t *APP_VER = L"1.2.6"; static const UINT WM_UPD = WM_APP + 1;
+enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_TAB4, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH };
+static const wchar_t *APP_VER = L"1.2.7"; static const UINT WM_UPD = WM_APP + 1;
 static int g_upd = 0; static std::wstring g_latest; static int g_bUpd = -1;	// g_upd: 0 verificando, 1 em dia, 2 ha versao nova, -1 sem resposta
 static bool g_pix = false; static Gdiplus::Bitmap *g_qr = nullptr, *g_icDisc = nullptr, *g_icInsta = nullptr, *g_icPix = nullptr;	// icones fornecidos pelo autor
 static const wchar_t *PIX_KEY = L"f5124246-e867-42ce-a16b-d139017560a5";
@@ -571,6 +599,17 @@ static void spaced(Graphics &g, const std::wstring &s, float x, float y, float p
 }
 
 struct Wd; static void slider_track(const Wd &d, float &tx0, float &tx1);
+// texto UTF-8 embutido no executavel (notas de atualizacao)
+static std::wstring load_res_text(int id)
+{
+	HRSRC r = FindResourceW(nullptr, MAKEINTRESOURCEW(id), RT_RCDATA); if (!r) return L"";
+	HGLOBAL hg = LoadResource(nullptr, r); DWORD n = SizeofResource(nullptr, r); const char *p = (const char *)LockResource(hg);
+	if (!p || !n) return L"";
+	if (n >= 3 && (unsigned char)p[0] == 0xEF) { p += 3; n -= 3; }
+	int w = MultiByteToWideChar(CP_UTF8, 0, p, (int)n, nullptr, 0); std::wstring s(w, L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, p, (int)n, &s[0], w);
+	return s;
+}
 static void layout_children()
 {
 	auto P = [](int v) { return (int)(v * g_s + 0.5f); };
@@ -578,6 +617,13 @@ static void layout_children()
 	MoveWindow(g_log, P(X0), P(84), P(X1 - X0), P(CH - 84 - 56), TRUE);
 	ShowWindow(g_path, g_page == 0 ? SW_SHOW : SW_HIDE);
 	ShowWindow(g_log, g_page == 2 ? SW_SHOW : SW_HIDE);
+	if (g_chg)
+	{
+		MoveWindow(g_chg, P(X0), P(84), P(X1 - X0), P(CH - 84 - 56), TRUE);
+		static int lang = -1;
+		if (lang != (int)g_pt) { lang = (int)g_pt; SetWindowTextW(g_chg, load_res_text(g_pt ? 108 : 109).c_str()); }
+		ShowWindow(g_chg, g_page == 4 ? SW_SHOW : SW_HIDE);
+	}
 }
 
 
@@ -691,6 +737,7 @@ static void build_ui()
 	add(W_TAB, -1, ID_TAB1, 0, 22, 0, 40, T(L"OPÇÕES", L"OPTIONS"));
 	add(W_TAB, -1, ID_TAB3, 0, 22, 0, 40, L"VRAM");
 	add(W_TAB, -1, ID_TAB2, 0, 22, 0, 40, T(L"REGISTRO", L"LOG"));
+	add(W_TAB, -1, ID_TAB4, 0, 22, 0, 40, T(L"NOVIDADES", L"WHAT'S NEW"));
 	add(W_BTN, -1, ID_PAY, 30, CH - 100.f, 200, 46, T(L"Apoie  ·  PayPal", L"Support me  ·  PayPal"), {}, 4);
 	add(W_BTN, -1, ID_PIX, 238, CH - 100.f, 132, 46, L"Pix", {}, 6);
 	add(W_BTN, -1, ID_DISC, X1 - 52 - 10 - 46 - 8 - 22 - 8 - 22, 28, 22, 28, L"", {}, 5);
@@ -748,12 +795,12 @@ static void render(Bitmap &back)
 		float x = (float)X0;
 		for (auto &d : g_w) if (d.type == W_TAB)
 		{
-			float w = text_w(g, d.text, 13.5f, FontStyleBold) + (float)d.text.size() * 1.4f + 8;	// largura com espacamento
+			float w = text_w(g, d.text, 12.5f, FontStyleBold) + (float)d.text.size() * 1.1f + 6;	// largura com espacamento (5 abas cabem antes dos icones)
 			d.r.X = x; d.r.Width = w;
 			bool on = d.id - ID_TAB0 == g_page, hov = &d - &g_w[0] == g_hover;
-			spaced(g, d.text, x, 33, 13.5f, on ? C_TXT : hov ? Color(255, 190, 196, 204) : C_MUT, 1.4f);
-			if (on) fill_rr(g, RectF(x, 60, w - 8, 3), 1.5f, C_ACC);
-			x += w + 12;
+			spaced(g, d.text, x, 34, 12.5f, on ? C_TXT : hov ? Color(255, 190, 196, 204) : C_MUT, 1.1f);
+			if (on) fill_rr(g, RectF(x, 60, w - 6, 3), 1.5f, C_ACC);
+			x += w + 9;
 		}
 		Pen ln(C_LINE, 1); g.DrawLine(&ln, (REAL)X0, 63.5f, (REAL)X1, 63.5f);
 	}
@@ -904,6 +951,7 @@ static void render(Bitmap &back)
 		text(g, T(L"clique em qualquer lugar para fechar", L"click anywhere to close"), RectF(cx, cy + 436, cw, 18), 11.5f, Color(255, 104, 111, 121), 1);
 	}
 	if (g_shot && g_page == 0) text(g, dcs_path().wstring(), RectF(X0 + 14.f, 229, X1 - X0 - 136.f, 22), 15, C_TXT);
+	if (g_shot && g_page == 4) { fill_rr(g, RectF((REAL)X0, 84, (REAL)(X1 - X0), CH - 140.f), 8, C_CARD); text(g, load_res_text(g_pt ? 108 : 109), RectF(X0 + 10.f, 92, X1 - X0 - 20.f, CH - 156.f), 13, Color(255, 190, 196, 204), 0, FontStyleRegular, L"Segoe UI", true); }
 	if (g_shot && g_page == 2) { fill_rr(g, RectF((REAL)X0, 84, (REAL)(X1 - X0), CH - 140.f), 8, C_CARD); float ly = 92; for (auto &ln : g_lines) { text(g, ln, RectF(X0 + 10.f, ly, X1 - X0 - 20.f, 18), 13, Color(255, 190, 196, 204), 0, FontStyleRegular, L"Consolas"); ly += 18; } }
 }
 static void paint(HDC hdc)
@@ -916,12 +964,12 @@ static void save_shots(const std::wstring &prefix)
 {
 	CLSID png; CLSIDFromString(L"{557CF406-1A04-11D3-9A73-0000F81EF32E}", &png);
 	g_shot = true;
-	for (int p = 0; p < 4; p++)
+	for (int p = 0; p < 5; p++)
 	{
 		g_page = p; Bitmap b((INT)(CW * g_s), (INT)(CH * g_s), PixelFormat32bppPARGB); render(b);
 		b.Save((prefix + std::to_wstring(p) + (g_pt ? L"_pt.png" : L"_en.png")).c_str(), &png, nullptr);
 	}
-	{ g_page = 0; g_pix = true; Bitmap b((INT)(CW * g_s), (INT)(CH * g_s), PixelFormat32bppPARGB); render(b); b.Save((prefix + L"4" + (g_pt ? L"_pt.png" : L"_en.png")).c_str(), &png, nullptr); }
+	{ g_page = 0; g_pix = true; Bitmap b((INT)(CW * g_s), (INT)(CH * g_s), PixelFormat32bppPARGB); render(b); b.Save((prefix + L"pix" + (g_pt ? L"_pt.png" : L"_en.png")).c_str(), &png, nullptr); }
 }
 
 static void slider_track(const Wd &d, float &tx0, float &tx1) { tx0 = d.r.X + 176 + 18; tx1 = d.r.X + d.r.Width - 62; }
@@ -951,7 +999,7 @@ static void command(int id)
 	HWND h = g_wnd;
 	switch (id)
 	{
-	case ID_TAB0: case ID_TAB1: case ID_TAB2: case ID_TAB3: g_page = id - ID_TAB0; layout_children(); break;
+	case ID_TAB0: case ID_TAB1: case ID_TAB2: case ID_TAB3: case ID_TAB4: g_page = id - ID_TAB0; layout_children(); break;
 	case ID_PAY:
 		if (OpenClipboard(g_wnd))
 		{
@@ -961,7 +1009,7 @@ static void command(int id)
 		}
 		ShellExecuteW(h, L"open", PAY_URL, nullptr, nullptr, SW_SHOW);	// pagina "enviar dinheiro" do PayPal; o e-mail ja vai copiado
 		break;
-	case ID_PIX: g_pix = true; ShowWindow(g_path, SW_HIDE); ShowWindow(g_log, SW_HIDE); break;
+	case ID_PIX: g_pix = true; ShowWindow(g_path, SW_HIDE); ShowWindow(g_log, SW_HIDE); if (g_chg) ShowWindow(g_chg, SW_HIDE); break;
 	case ID_DISC: ShellExecuteW(h, L"open", L"https://discord.gg/3zD4XBPwK", nullptr, nullptr, SW_SHOW); break;
 	case ID_INSTA: ShellExecuteW(h, L"open", L"https://www.instagram.com/sireiras/", nullptr, nullptr, SW_SHOW); break;
 	case ID_UPD: if (g_upd == 2) ShellExecuteW(h, L"open", L"https://github.com/fcirera/Nightzim-BoomMod/releases/latest", nullptr, nullptr, SW_SHOW); break;
@@ -1022,7 +1070,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 		return 0;
 	case WM_CTLCOLOREDIT: case WM_CTLCOLORSTATIC:
 	{
-		HDC dc = (HDC)w; bool lg = (HWND)l == g_log;
+		HDC dc = (HDC)w; bool lg = (HWND)l == g_log || (HWND)l == g_chg;
 		SetTextColor(dc, lg ? RGB(190, 196, 204) : RGB(232, 234, 237)); SetBkColor(dc, RGB(26, 29, 35));
 		return (LRESULT)g_brEdit;
 	}
@@ -1064,6 +1112,8 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int)
 	g_log = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL, 0, 0, 10, 10, g_wnd, nullptr, hi, nullptr);
 	SendMessageW(g_path, WM_SETFONT, (WPARAM)g_fEdit, TRUE); SendMessageW(g_log, WM_SETFONT, (WPARAM)g_fLog, TRUE);
 	SetWindowTheme(g_log, L"DarkMode_Explorer", nullptr);
+	g_chg = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL, 0, 0, 10, 10, g_wnd, nullptr, hi, nullptr);
+	SendMessageW(g_chg, WM_SETFONT, (WPARAM)g_fEdit, TRUE); SetWindowTheme(g_chg, L"DarkMode_Explorer", nullptr);
 	build_ui(); layout_children();
 
 	fs::path dcs = find_dcs();

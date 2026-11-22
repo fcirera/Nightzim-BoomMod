@@ -245,6 +245,18 @@ float4 ps_main(VSOut i) : SV_Target
 
 		float ws = ss / (ss + sd), wd = 1.0 - ws;
 		float3 alb = ws * lerp(ALB_S, float3(0.015, 0.017, 0.024), shock2.w) + wd * lerp(ALB_D, float3(0.50, 0.48, 0.45), shock2.w);	// fuligem mais preta/azulada, poeira mais clara
+		if (grid.z > 900.0)	// nuvem nuclear (so ela tem caixa com mais de 900 m de altura): terra, fuligem e oxidos de nitrogenio -> marrom-avermelhado escuro, nao vapor branco
+		{
+			ws = 1.0 - wd * 0.5; wd = 1.0 - ws;
+			float hz = saturate(uvw.z * 1.6);								// tronco e base mais avermelhados, capuz mais cinza-marrom
+			float3 dN = lerp(float3(0.34, 0.20, 0.13), float3(0.27, 0.22, 0.19), hz);
+			alb = ws * float3(0.040, 0.032, 0.028) + wd * dN;
+		}
+		else if (grid.x > 5000.0)	// saia de poeira da onda de choque nuclear (caixa larga e baixa): terra seca levantada, ocre-acinzentado
+		{
+			float hz = saturate(uvw.z * 2.5);
+			alb = lerp(float3(0.42, 0.33, 0.24), float3(0.36, 0.31, 0.26), hz) * (0.85 + 0.15 * ws);
+		}
 		float am = (alb.r + alb.g + alb.b) / 3.0;
 		float sunv = exp(-tauS) + am * (0.55 * exp(-0.28 * tauS) + 0.25 * am * exp(-0.07 * tauS));
 		float skyv = exp(-0.45 * tauU) * 0.85 + 0.15 * exp(-0.1 * tauU);
@@ -499,4 +511,352 @@ float4 ps_flash(VSOut i) : SV_Target
 	float a = (1.0 - f) * (1.0 - d) * (1.0 - saturate(g * 0.18));
 	// mistura com o blend do mod (cor + destino * alfa)
 	return float4(white * f + (dark * d + L) * (1.0 - f), a);
+}
+
+// ---------------------------------------------------------------- onda de choque nuclear
+// Desenhada por cima da cena inteira (copia do quadro em SceneTex). Espaco: origem no ponto da explosao (no chao),
+// x norte, y leste, z cima, sem o giro da grade. Tres partes: a casca que distorce o ar (e a nuvem de condensacao
+// no comeco), o muro de poeira que corre pelo chao atras da frente, e o tranco quando a frente passa pela camera.
+cbuffer NS : register(b4)
+{
+	float4 nsA;		// x: raio da frente (m), y: espessura (m), z: refracao (m), w: tempo desde a detonacao (s)
+	float4 nsB;		// x: largura do muro de poeira (m), y: altura do muro (m), z: densidade (1/m), w: nuvem de condensacao (0..1)
+	float4 nsC;		// xy: tremida da tela (pixels), z: pulso de distorcao na tela (0..1), w: distancia focal (pixels)
+	float4 nsD;		// xyz: direcao do sol (mesmo espaco), w: luz do dia (0..1)
+	float4 nsE;		// rgb: luz do sol, w: semente
+	float4 nsF;		// rgb: luz do ceu, w: poeira deixada para tras (0..1)
+};
+float ns_noise(float3 p)
+{
+	return Noise.SampleLevel(LinWrap, p, 0);
+}
+
+// trecho [entrada, saida] do raio dentro do cilindro vertical de raio Rc centrado na origem (x > y = nao cruza)
+float2 cyl_seg(float3 o, float3 d, float Rc)
+{
+	float a = dot(d.xy, d.xy), bq = 2.0 * dot(o.xy, d.xy), cq = dot(o.xy, o.xy) - Rc * Rc;
+	float disc = bq * bq - 4.0 * a * cq;
+	if (disc <= 0.0 || a < 1e-8) return float2(1, 0);
+	float sq = sqrt(disc);
+	return float2((-bq - sq) / (2.0 * a), (-bq + sq) / (2.0 * a));
+}
+void dust_march(float3 o, float3 d, float t0, float t1, int N, float j, float t, float Hm, inout float T, inout float3 acc)
+{
+	if (t1 <= t0 || T < 0.02) return;
+	float R = nsA.x, wd = nsB.x;
+	float dt = (t1 - t0) / N;
+	float3 sunD = nsD.xyz;
+	float3 Ld = nsE.rgb * (0.35 + 0.65 * saturate(sunD.z * 3.0)) * 0.55 + nsF.rgb * 0.75;
+	float3 alb = float3(0.62, 0.53, 0.42);
+	[loop] for (int k = 0; k < N; k++)
+	{
+		float s = t0 + (k + j) * dt;
+		float3 p = o + d * s;
+		float rr = length(p.xy);
+		float behind = R - rr;									// > 0 = dentro da frente
+		if (behind < -30.0 || rr < 180.0) continue;
+		float edge = saturate((30.0 + min(behind, 0.0)) / 30.0);	// borda externa suave
+		float wall = exp(-max(behind, 0.0) / wd);					// mais denso logo atras da frente
+		float rest = nsF.w * saturate(behind / (2.0 * wd)) * saturate((7.0 * wd - behind) / (2.0 * wd));	// poeira que fica no ar
+		float Hh = Hm * (0.35 + 0.65 * wall) + Hm * 0.5 * rest;
+		float vz = saturate(1.0 - p.z / max(Hh, 1.0)); vz *= vz;
+		float n = ns_noise(float3(p.xy * 0.0035, p.z * 0.006 - t * 0.015) + nsE.w) * 0.65
+		        + ns_noise(float3(p.xy * 0.013, p.z * 0.02 + t * 0.03)) * 0.35;
+		float dens = nsB.z * edge * (wall + 0.35 * rest) * vz * saturate(n * 2.0 - 0.45);
+		if (dens <= 0.0) continue;
+		float sh = 0.55 + 0.45 * saturate(p.z / max(Hh, 1.0));		// base mais escura (sombra propria)
+		float a2 = 1.0 - exp(-dens * dt);
+		acc += T * a2 * alb * Ld * sh;
+		T *= 1.0 - a2;
+		if (T < 0.02) break;
+	}
+}
+float4 ps_nshock(VSOut i) : SV_Target
+{
+	float2 pix = i.pos.xy;
+	float2 shake = nsC.xy;
+	float3 dir = camF.xyz + i.ndc.x * camF.w * camR.xyz + i.ndc.y * camR.w * camU.xyz;
+	float dl = length(dir);
+	float3 d = dir / dl;
+	float3 o = camO.xyz;
+	float zmax = viewDepthAt(pix);					// profundidade da cena neste pixel (m, ao longo da frente)
+	float tmax = zmax * dl;							// distancia ao longo do raio
+
+	float R = nsA.x, th = nsA.y, t = nsA.w;
+	float2 off = shake;
+
+	// --- casca da frente: distorce o que esta atras dela (so acima do chao)
+	float tc = -dot(o, d);
+	float b = length(o + d * tc);
+	float shellA = 0.0, wil = 0.0;
+	if (R > 1.0 && b < R + th)
+	{
+		float h = sqrt(max(R * R - b * b, 0));
+		float tS = b < R ? tc - h : tc;
+		if (tS < 0) tS = tc + h;
+		float3 pS = o + d * tS;
+		if (tS > 0 && tS < tmax && pS.z > -5.0)
+		{
+			float x = saturate((b - (R - th)) / (2.0 * th));
+			float g = sin(3.14159 * x) * (b > R - th ? 1.0 : 0.0);
+			float zS = tS / dl;
+			float c0 = dot(-o, camF.xyz);
+			float2 cpix = screen.xy * 0.5;
+			if (c0 > 0.1)
+			{
+				float2 nc = float2(dot(-o, camR.xyz) / (c0 * camF.w), dot(-o, camU.xyz) / (c0 * camR.w));
+				cpix = float2((nc.x * 0.5 + 0.5) * screen.x, (0.5 - nc.y * 0.5) * screen.y);
+			}
+			float2 rad = pix - cpix; rad = length(rad) > 1e-3 ? normalize(rad) : float2(1, 0);
+			off -= rad * g * nsA.z * nsC.w / max(zS, 1.0);
+			shellA = g;
+			if (nsB.w > 0.0 && b < R)	// nuvem de condensacao (Wilson): casca branca com textura
+			{
+				float n = ns_noise(pS * 0.0025 + float3(0.17, 0.31, t * 0.01)) * 0.7 + ns_noise(pS * 0.009) * 0.3;
+				wil = nsB.w * saturate(2.0 * h / (1.1 * R)) * saturate(n * 1.6 - 0.25) * saturate(pS.z / 60.0);
+			}
+		}
+	}
+	// --- pulso na tela inteira quando a frente passa pela camera
+	if (nsC.z > 0.0)
+	{
+		float2 q = (pix * screen.zw - 0.5);
+		off += q * nsC.z * 22.0 * (0.6 + 0.4 * sin(t * 90.0));
+	}
+
+	float3 col = SceneTex.SampleLevel(LinClamp, (pix + off) * screen.zw, 0).rgb;
+	col *= 1.0 + 0.05 * shellA + 0.25 * nsC.z;
+	col = lerp(col, float3(0.92, 0.93, 0.95) * (0.55 + 0.45 * nsD.w), wil * 0.8);
+
+	// --- muro de poeira: anel baixo que corre atras da frente e deixa poeira no ar (so no anel perto da frente)
+	float Hm = nsB.y;
+	if (nsB.z > 0.0 && R > 150.0)
+	{
+		float Rc = R + 30.0, Rin = max(R - 7.0 * nsB.x, 150.0), Hc = 2.2 * Hm;
+		float2 so = cyl_seg(o, d, Rc), si = cyl_seg(o, d, Rin);
+		// limite de altura
+		float z0 = -1e9, z1 = 1e9;
+		if (abs(d.z) > 1e-5) { float a0 = (-2.0 - o.z) / d.z, a1 = (Hc - o.z) / d.z; z0 = min(a0, a1); z1 = max(a0, a1); }
+		else if (o.z > Hc || o.z < -2.0) { z0 = 1; z1 = 0; }
+		so.x = max(so.x, max(z0, 0.0)); so.y = min(min(so.y, z1), tmax);
+		float T = 1.0; float3 acc = 0;
+		if (so.y > so.x)
+		{
+			float j = frac(sin(dot(pix, float2(12.9898, 78.233))) * 43758.5453);
+			if (si.y > si.x && si.y > so.x && si.x < so.y)
+			{	// o raio cruza o miolo (sem poeira): marcha antes e depois dele
+				dust_march(o, d, so.x, min(si.x, so.y), 20, j, t, Hm, T, acc);
+				dust_march(o, d, max(si.y, so.x), so.y, 20, j, t, Hm, T, acc);
+			}
+			else dust_march(o, d, so.x, so.y, 40, j, t, Hm, T, acc);
+		}
+		col = col * T + acc;
+	}
+	return float4(col, 1);
+}
+
+// ---------------------------------------------------------------- rastro de fumaca de missil (SCUD)
+// Pontos relativos a camera (x norte, y leste, z cima): plP[2i] = posicao, raio; plP[2i+1] = densidade, -, idade, inicio.
+// Passo 1: cada trecho entre dois pontos e um tubo; acha os ate 8 trechos que o raio de visao cruza e o intervalo do raio
+// dentro deles. Passo 2: marcha 32 passos so nesse intervalo; a densidade e a uniao (maximo) dos tubos, roida nas bordas
+// por ruido 3D preso no mundo (rolos), com sombra do sol (2 amostras), luz do ceu por cima e a luz da chama no rastro novo.
+// A chama e um segmento brilhante atras da ponta (plR = ponta, plF = direcao para tras e comprimento).
+cbuffer PL : register(b5)
+{
+	float4 plA;		// x: numero de pontos, y: luz do dia (0..1), z: tempo (s), w: ganho de densidade
+	float4 plS;		// xyz: direcao do sol
+	float4 plL;		// rgb: luz do sol
+	float4 plK;		// rgb: luz do ceu
+	float4 plO;		// xyz: posicao da camera no mundo (modulo 4096, para o ruido ficar preso no mundo)
+	float4 plR;		// xyz: ponta do missil (relativa a camera), w: chama (0..1)
+	float4 plF;		// xyz: direcao para tras, w: comprimento da chama (m)
+	float4 plP[640];
+};
+#define PL_K 8
+float pl_seg(float3 x, int k, out float r, out float rho, out float age, out float vz)
+{
+	float4 A = plP[2 * k - 2], Ai = plP[2 * k - 1], B = plP[2 * k], Bi = plP[2 * k + 1];
+	float3 u = B.xyz - A.xyz;
+	float tu = dot(x - A.xyz, u) / max(dot(u, u), 1e-6);
+	float t = saturate(tu);
+	float3 q = A.xyz + u * t;
+	r = lerp(A.w, B.w, t); rho = lerp(Ai.x, Bi.x, t); age = lerp(Ai.z, Bi.z, t);
+	bool last = (k == (int)plA.x - 1) || (plP[2 * k + 3].w > 0.5);
+	if (last && tu > 1.0) rho *= saturate(1.0 - (tu - 1.0) * length(u) / (0.4 * r));	// nada de bola de fumaca na frente do missil
+	float3 o = x - q;
+	vz = clamp(o.z / (1.5 * r), -1.0, 1.0);
+	return length(o);
+}
+float pl_dens(float3 x0, int cand[PL_K], int nc, out float age, out float vz, out float rnear)
+{
+	// serpenteia: desloca o ponto por um ruido de baixa frequencia (o tubo deixa de ser um cone liso)
+	float3 pw0 = plO.xyz + x0;
+	float3 wv = float3(Noise.SampleLevel(LinWrap, pw0 * 0.0021 + 0.11, 0), Noise.SampleLevel(LinWrap, pw0 * 0.0021 + 0.47, 0), Noise.SampleLevel(LinWrap, pw0 * 0.0021 + 0.83, 0)) - 0.5;
+	float r0_, rh_, ag_, vz_; pl_seg(x0, cand[0], r0_, rh_, ag_, vz_);
+	float3 x = x0 + wv * (0.8 * r0_ * saturate(ag_ / 3.0));	// o rastro recem-saido do bocal nao serpenteia
+	float best = 0.0; age = 0.0; vz = 0.0; rnear = 10.0;
+	float dmin = 1e9;
+	float edges[PL_K]; float rhos[PL_K];
+	[unroll] for (int j = 0; j < PL_K; j++)
+	{
+		edges[j] = 9.0; rhos[j] = 0.0;
+		if (j < nc)
+		{
+			float r, rho, ag, v;
+			float dist = pl_seg(x, cand[j], r, rho, ag, v);
+			edges[j] = dist / (1.5 * r); rhos[j] = rho;
+			if (edges[j] < dmin) { dmin = edges[j]; age = ag; vz = v; rnear = r; }
+		}
+	}
+	if (dmin > 1.25) return 0.0;
+	float form = plR.w > 0.0 ? saturate((length(x0 - plR.xyz) - 8.0) / 16.0) : 1.0;	// a fumaca vai se formando de ~8 a ~24 m atras do bocal (sem corte reto)
+	if (form <= 0.0) return 0.0;
+	float3 pw = plO.xyz + x;
+	// ruido em escalas fixas do mundo (nao depende do raio do trecho mais proximo: sem faixas nas juntas dos trechos)
+	float3 uvw = pw / 160.0 + float3(0.0, 0.0, -plA.z * 0.002);
+	float fb = Noise.SampleLevel(LinWrap, uvw, 0), fm = Noise.SampleLevel(LinWrap, uvw * 3.1 + 0.37, 0), fs = Noise.SampleLevel(LinWrap, uvw * 9.7 + 0.71, 0);
+	float wbig = saturate(rnear / 40.0);			// rastro grosso: lombos grandes; rastro fino: so o detalhe
+	float f = lerp(fm * 0.7 + fs * 0.3, fb * 0.6 + fm * 0.3 + fs * 0.1, wbig);
+	[unroll] for (int j2 = 0; j2 < PL_K; j2++)
+	{
+		float e = edges[j2];
+		float dd = saturate((f * 1.6 - e * 0.9 + 0.15) * 2.5) * saturate(1.25 - e) * rhos[j2];
+		best = max(best, dd);
+	}
+	return best * form;
+}
+float4 ps_plume(VSOut i) : SV_Target
+{
+	float2 pix = i.pos.xy;
+	float3 dir = camF.xyz + i.ndc.x * camF.w * camR.xyz + i.ndc.y * camR.w * camU.xyz;
+	float dl = length(dir);
+	float3 d = dir / dl;
+	float tmax = viewDepthAt(pix) * dl;
+	int n = (int)plA.x;
+	int cand[PL_K]; float csc[PL_K];
+	[unroll] for (int c0 = 0; c0 < PL_K; c0++) { cand[c0] = 1; csc[c0] = 9.0; }
+	int nc = 0; float s0 = 1e12, s1 = 0.0;
+	// passo 1: trechos candidatos
+	[loop] for (int k = 1; k < n; k++)
+	{
+		float4 A = plP[2 * k - 2], B = plP[2 * k];
+		if (plP[2 * k + 1].w > 0.5) continue;
+		float3 u = B.xyz - A.xyz;
+		float L = length(u);
+		if (L < 1e-3) continue;
+		float3 e = u / L;
+		float b = dot(d, e), dW = dot(d, -A.xyz), eW = dot(e, -A.xyz);
+		float den = max(1.0 - b * b, 1e-6);
+		float tq = clamp((eW - b * dW) / den, 0.0, L);
+		float s = max(dot(d, A.xyz + e * tq), 0.0);
+		tq = clamp(dot(d * s - A.xyz, e), 0.0, L);
+		float dist = length(d * s - (A.xyz + e * tq));
+		float Rm = 1.7 * max(A.w, B.w);
+		float sc = dist / Rm;
+		if (sc >= 1.0) continue;
+		float half = Rm / max(sqrt(den), 0.25);
+		s0 = min(s0, s - half); s1 = max(s1, s + half);
+		// guarda nos 8 mais proximos (troca o pior)
+		int w = 0; float wv = csc[0];
+		[unroll] for (int j = 1; j < PL_K; j++) if (csc[j] > wv) { wv = csc[j]; w = j; }
+		if (sc < wv) { [unroll] for (int j3 = 0; j3 < PL_K; j3++) if (j3 == w) { csc[j3] = sc; cand[j3] = k; } nc = min(nc + 1, PL_K); }
+	}
+	float3 col = 0; float T = 1.0; float fogS = 0.0, fogW = 0.0;
+	float3 sunD = plS.xyz;
+	float day = plA.y;
+	float3 Lamb = plK.rgb + 0.02;
+	float3 Lsun = plL.rgb * day * 0.9;
+	if (nc > 0)
+	{
+		// candidatos validos primeiro
+		int cc[PL_K]; int m = 0;
+		[unroll] for (int j = 0; j < PL_K; j++) { cc[j] = cand[j]; }
+		[unroll] for (int a = 0; a < PL_K; a++) [unroll] for (int b2 = a + 1; b2 < PL_K; b2++) if (csc[b2] < csc[a]) { float tf = csc[a]; csc[a] = csc[b2]; csc[b2] = tf; int ti = cc[a]; cc[a] = cc[b2]; cc[b2] = ti; }
+		[unroll] for (int j4 = 0; j4 < PL_K; j4++) if (csc[j4] < 1.0) m = j4 + 1;
+		s0 = max(s0, 0.0); s1 = min(s1, tmax);
+		const int NS = 32;
+		float ds = (s1 - s0) / NS;
+		float jit = frac(sin(dot(pix, float2(12.9898, 78.233))) * 43758.5453);
+		[loop] for (int st = 0; st < NS && s1 > s0; st++)
+		{
+			float s = s0 + (st + jit) * ds;
+			float3 x = d * s;
+			float age, vz, rn;
+			float rho = pl_dens(x, cc, m, age, vz, rn) * 4.0 * plA.w;
+			if (rho <= 0.0) continue;
+			float a1, v1, r1, a2, v2, r2;
+			float sh = pl_dens(x + sunD * 0.6 * rn, cc, m, a1, v1, r1) * 0.6 + pl_dens(x + sunD * 1.6 * rn, cc, m, a2, v2, r2);
+			float ts = sh * rn * 4.0 * plA.w;
+			float sunl = exp(-ts * 0.8) * 0.78 + 0.22 * exp(-ts * 0.25);	// sombra propria macia (espalhamento multiplo)
+			float y = saturate(age / 4.0), o = saturate(age / 90.0);
+			float3 alb = lerp(float3(0.40, 0.27, 0.18), float3(0.36, 0.30, 0.23), y);	// mesma faixa de albedo da poeira (o sol do mod vale ~2,5)	// novo: avermelhado (NO2 do acido nitrico)
+			alb = lerp(alb, float3(0.37, 0.35, 0.32), o);	// velho: pardo-acinzentado
+			float dh = length(x - plR.xyz);
+			float3 fl = float3(1.0, 0.55, 0.25) * 1.2 * exp(-dh / 20.0) * plR.w;
+			float3 amb = Lamb * (0.55 + 0.45 * (0.5 + 0.5 * vz));
+			float3 c = alb * (amb * 0.9 + Lsun * sunl * 0.8 + fl);
+			float a = 1.0 - exp(-rho * ds);
+			col += T * a * c; fogS += T * a * s; fogW += T * a; T *= 1.0 - a;
+			if (T < 0.01) break;
+		}
+	}
+	fogS = fogW > 1e-5 ? fogS / fogW : 0.0;
+	// chama: cone de gas quente saindo do bocal. Emissao volumetrica integrada pelo raio (8 passos dentro do cone),
+	// nucleo branco e estreito, envelope amarelo-laranja que abre e esfria, turbulencia correndo para tras e cintilacao.
+	float3 glow = 0;
+	if (plR.w > 0.0)
+	{
+		float3 A = plR.xyz, e = plF.xyz; float Ln = plF.w;
+		float b = dot(d, e), dW = dot(d, -A), eW = dot(e, -A);
+		float den = max(1.0 - b * b, 1e-5);
+		float tq = clamp((eW - b * dW) / den, 0.0, Ln);
+		float sc = max(dot(d, A + e * tq), 0.0);
+		float3 Qc = A + e * tq;
+		float dc = length(d * sc - Qc);
+		float Rmax = 1.3 + 6.0;
+		if (dc < Rmax * 2.0)
+		{
+			float half = (Rmax * 1.5) / max(sqrt(den), 0.12);
+			float sa = max(sc - half, 0.0), sb = sc + half;
+			float dsf = (sb - sa) / 10.0;
+			float fl_t = plA.z;
+			float flick = 0.9 + 0.1 * sin(fl_t * 61.0) * sin(fl_t * 23.0 + 1.3);
+			[loop] for (int q = 0; q < 10; q++)
+			{
+				float s = sa + (q + 0.5) * dsf;
+				if (s > tmax) break;
+				float3 x = d * s;
+				float tt = dot(x - A, e);
+				if (tt < 0.0 || tt > Ln) continue;	// comeca exatamente no bocal
+				float f = saturate(tt / Ln);
+				float rr = 0.55 + 6.5 * pow(f, 0.6);	// bocal do Scud ~0,9 m de diametro					// cone que abre
+				float rad = length(x - (A + e * clamp(tt, 0.0, Ln))) / rr;
+				float3 pw = plO.xyz + x;
+				float tn = Noise.SampleLevel(LinWrap, pw * 0.09 - e * fl_t * 3.0, 0);	// turbulencia correndo para tras
+				float env = exp(-rad * rad * 1.6) * pow(1.0 - f, 0.9) * (0.45 + 1.1 * tn);
+				float core = exp(-rad * rad * 9.0) * exp(-f * 6.0) * 3.0;				// nucleo branco junto ao bocal
+				float hot = saturate(1.0 - f * 1.4);
+				float3 ec = lerp(float3(1.0, 0.38, 0.08), float3(1.0, 0.72, 0.30), hot);	// esfria: amarelo -> laranja -> vermelho
+				float outer = exp(-rad * rad * 0.7) * pow(1.0 - f, 0.8) * (0.6 + 0.8 * tn);	// envelope laranja mais largo e transparente
+				glow += (ec * env * 0.50 + float3(1.0, 0.95, 0.82) * core * 0.05 + float3(1.0, 0.45, 0.15) * outer * 0.10) * dsf * flick;
+			}
+		}
+		// halo e ponto de longe (a chama continua visivel a muitos km)
+		float ang = dc / max(sc, 1.0);
+		float near = saturate(1.0 - tq / (Ln * 0.4));
+		float tqu = (eW - b * dW) / den;	// sem limitar: negativo = na frente do bocal (em cima do missil)
+		float behind = saturate(tqu / 3.0 + 0.15);
+		glow += float3(1.0, 0.8, 0.5) * (0.25 * exp(-dc / 8.0) * (0.5 + 0.5 * (1.0 - day * 0.5)) * behind + 0.9 * exp(-(ang / 0.0025) * (ang / 0.0025)) * near) * saturate((tmax - sc) / 5.0 + 0.5);
+		glow *= plR.w * max(T, 0.3);
+	}
+	// mesma saida da fumaca das explosoes: luz linear -> exposicao -> curva de tom -> gama, e nevoa atmosferica pela distancia
+	float gl = saturate(max(glow.r, max(glow.g, glow.b)) * 0.9);
+	T *= 1.0 - 0.45 * gl;	// gas quente denso: cobre um pouco o fundo (senao o laranja somado ao ceu azul vira branco)
+	float cov = 1.0 - T;
+	float3 ce = (col + glow) * scales2.z;
+	float cv = max(max(cov, 1e-4), saturate(max(ce.r, max(ce.g, ce.b)) * 0.5));
+	float3 c = tonemap(ce / cv);
+	float fa = 1.0 - exp(-max(fogS, 0.0) / max(fog.w, 1.0));
+	c = lerp(c, fog.rgb, fa) * cv;
+	return float4(c, T);
 }

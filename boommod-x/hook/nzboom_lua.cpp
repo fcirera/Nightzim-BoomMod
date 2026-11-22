@@ -136,10 +136,32 @@ static int l_set_opts(lua_State *L)
 static int l_ack(lua_State *L) { if (open_shm()) g->spawn_ack = g->spawn_req; return 0; }
 static int l_dev(lua_State *L) { p_pushboolean(L, open_shm() && g->dev == 1); return 1; }
 
+// nz.track(id, x, y, z, t, wx, wz): missil em voo (rastro de fumaca); nz.track_end(id): sumiu
+static int l_track(lua_State *L)
+{
+	if (!open_shm()) return 0;
+	int32_t id = (int32_t)num(L, 1); int k = -1;
+	for (int i = 0; i < NZ_TRK; i++) if (g->trk[i].on && g->trk[i].id == id) { k = i; break; }
+	if (k < 0) for (int i = 0; i < NZ_TRK; i++) if (!g->trk[i].on) { k = i; break; }
+	if (k < 0) return 0;
+	auto &e = g->trk[k];
+	e.p[0] = num(L, 2); e.p[1] = num(L, 3); e.p[2] = num(L, 4); e.t = num(L, 5);
+	e.wx = p_gettop(L) >= 7 ? (float)num(L, 6) : 0.f; e.wz = p_gettop(L) >= 7 ? (float)num(L, 7) : 0.f;
+	e.id = id; MemoryBarrier(); e.on = 1; InterlockedIncrement(&g->trk_seq);
+	return 0;
+}
+static int l_track_end(lua_State *L)
+{
+	if (!open_shm()) return 0;
+	int32_t id = (int32_t)num(L, 1);
+	for (int i = 0; i < NZ_TRK; i++) if (g->trk[i].on && g->trk[i].id == id) g->trk[i].on = 0;
+	InterlockedIncrement(&g->trk_seq);
+	return 0;
+}
 static const luaL_Reg funcs[] = {
 	{"dev", l_dev}, {"ack", l_ack}, {"set_opts", l_set_opts},
 	{"open", l_open}, {"camera", l_camera}, {"spawn_pending", l_spawn_pending}, {"spawn", l_spawn},
-	{"probe", l_probe}, {"probe_sample", l_probe_sample}, {"calib", l_calib}, {"sun", l_sun}, {"reset", l_reset}, {nullptr, nullptr}};
+	{"probe", l_probe}, {"probe_sample", l_probe_sample}, {"calib", l_calib}, {"sun", l_sun}, {"reset", l_reset}, {"track", l_track}, {"track_end", l_track_end}, {nullptr, nullptr}};
 
 template <class T> static bool R(HMODULE h, T &f, const char *n) { f = (T)GetProcAddress(h, n); return f != nullptr; }
 

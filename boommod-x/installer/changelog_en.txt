@@ -1,0 +1,78 @@
+Nightzim BoomMod X - what's new
+(newest first; full history: github.com/fcirera/Nightzim-BoomMod/blob/main/CHANGELOG.md)
+
+• Installer fix (v1.2.7): updates did not finish. When updating over an existing install on the same drive, copying a file over the old one failed and the update stopped half way (the error lines with accents were also dropped from the log). Files are now replaced with the Windows copy/move calls and the log is written in UTF-8.
+
+• Changelog in the installer (v1.2.7): new "WHAT'S NEW" tab with these notes.
+
+• SCUD smoke trail (v1.2.7): the SCUD now leaves its own volumetric smoke trail instead of the game's thin line. Reddish just behind the nozzle (nitric acid fuel), light brown after a few seconds and greyish brown as it ages; it grows, rolls, drifts with the wind and starts forming about 10 m behind the nozzle. The flame is a cone of hot gas starting exactly at the nozzle (white core, yellow to orange envelope, turbulence and flicker) and always points backwards along the flight path. Same tone curve and haze as the explosions, also in VR. Tunable in NightzimBoom.ini, section [rastro]: scud (0/1), densidade, tamanho, bocal_m. Needs the updated hook and nzboom.dll from this package.
+
+• Nuclear dust skirt (v1.2.7): new volume nuke_dust.nzv (3D simulation): a ring of raised dust that grows with the shock wave and slows down, up to about 4 km radius and about 100 m tall at the front, low in the middle. About 250 MB of VRAM with BC7 compression (about 1 GB without).
+
+• Nuclear explosion (v1.2.7): the dust is always drawn under the mushroom (it used to cover it); the mushroom smoke is brown-red instead of looking like white vapour; the old dust wall of the shock wave was removed; camera shake and air refraction when the shock arrives ([nuke] tranco, choque_refracao).
+
+• SCUD = nuclear (v1.2.6): the SCUD missile now detonates with the 11 kt nuclear explosion. Installer: Options > "SCUD missile explosion" (Nuke 11kt (test) / Same as JDAM), on by default. The JDAM keeps its own explosion.
+
+• Nuclear flash and lens effects (v1.2.6): yellow-white flash over the whole screen at detonation, then the fireball glare (blinding core, bloom, light rays, horizontal lens streak, colored lens ring and lens ghosts that move and rotate as you turn your head), an orange haze and the view darkened while the eye readapts (about 10 s). Also in VR. Tunable in NightzimBoom.ini, section [nuke]: clarao (strength) and adaptacao_s (readaptation time).
+
+• Nuke sound (v1.2.6): the nuclear blast is now heard up to 90 km away (other explosions stay at 20 km).
+
+• Missions can request explosions (v1.2.6): a mission script can add "x,y,z,type" to the global table nzx and the mod draws that explosion (for example type 9 = nuclear, 0 = JDAM).
+
+• Fix (v1.2.5): VR explosions not following the head. In some sessions (seen with Virtual Desktop) the add-on located the game's camera matrix while still in the menu and locked onto the wrong one, so the explosions did not track head movement. It now learns only with the mission running, accepts only the matrix stored together with the eye projection, and learns again by itself if the game recreates it (add-on v24).
+
+• Fix (v1.2.5): installer used Saved Games\DCS.openbeta on installs that use Saved Games\DCS. The installer now reads the game's dcs_variant.txt to pick the right Saved Games folder. Thanks to the r/hoggit user who reported it.
+
+• New (v1.2.5): ReShade check in the installer. It warns when ReShade is missing, is older than 6.0, is the build without full add-on support, or did not load the add-on, and says what to do in each case.
+
+• New (v1.2.5, test): "Nuke 11kt (test)" option for the JDAM. A third choice in "JDAM explosion" swaps the JDAM for an 11 kt nuclear burst with a mushroom cloud about 1.3 km tall (new fluid simulation, about 240 MB of VRAM with BC7). Still in testing: no screen flash yet and the cloud looks coarse up close.
+
+• JDAM with the new fire (v1.2.3): same simulation, size and mushroom as before, but the fireball stays white-hot longer and the flame fades slowly (about 5 s) through the smoke while the mushroom rises, instead of going dark in about 1 s.
+
+• Rocket New Shader (v1.2.3): 4 new rocket explosion variations, with their own slider in the VRAM tab (Off, 1 to 4). They are mixed into the rocket draw.
+
+• New shaders on by default (v1.2.3): Mk-82 New Shader (6) and Rocket New Shader (4) now come switched on, and the old Mk-82 and rocket explosions come switched off. Change it in the VRAM tab. If a new-shader file is missing, the old explosion is used automatically.
+
+• Explosion limit (v1.2.3): new slider in the VRAM tab, 0 to 50 (default 30), for how many explosions may exist at the same time. The limit used to be fixed at 12; when it is reached, the oldest explosion gives way to the new one.
+
+• Update check (v1.2.2): the installer now asks GitHub on start whether a newer release exists and shows "You have the latest version" or "New version X available - download" (click opens the releases page). If it cannot reach GitHub it just says so; nothing else changes.
+
+• VRAM tab uses sliders (v1.2.2): each explosion type is now a slider (Off, 1 to 5) instead of buttons.
+
+• New: "Mk-82 New Shader" (v1.2.2): a 7th line in the VRAM tab with 6 new Mk-82 variations (faster, more violent, more chaotic start). They are drawn in the same random draw as the normal Mk-82 variations. Off by default (add-on v21). Needs the mk82n.nzv files that come in the package.
+
+• Fix (v1.2.1): game closing at start on some installs. When another program in the DCS process created a tiny 64x64 test window before the game's own screen (seen on a Steam install), the add-on initialised on it and was then unloaded by ReShade while still loading the explosion volumes. The add-on now ignores screens smaller than 320x200 and stays in memory until DCS closes. Confirmed working on the developer's PC; thanks to the user who sent the logs.
+
+• Fix: A-4E-C Mk-77 napalm drew two explosions. The mod's bomb body opens about 35 m above the ground and releases the napalm itself; the hook counted the body as an air burst on top of the napalm. It now counts only the napalm.
+
+• VR (OpenXR): explosions are now drawn inside the headset, once per eye, with each eye's own off-centre projection. Confirmed on Quest 3 through Quest Link. No shock wave refraction in VR yet, and VR uses a lighter ray-march quality.
+
+• VR fixes: the add-on no longer shuts itself down when the VR runtime destroys one of its own graphics devices, and the periodic camera search that caused stutter in VR is gone.
+
+• Targeting pod: explosions are now also drawn in the targeting pod image (MFD). The add-on finds the pod's own render pass (narrow field of view) and draws the explosion there with the pod camera. Confirmed working in game (F-16C).
+
+• Night lighting: with the sun below the horizon the smoke no longer receives daytime sky and ground light (it was showing up light grey at night), distance haze goes dark, and fire and fire-lit smoke get brighter, as seen by a dark-adapted eye. In testing.
+
+• New installer look: dark custom interface with in-game screenshots, Install / Options / Log tabs, PT/EN switch, support by PayPal or Pix (QR Code) and Discord / Instagram / GitHub links.
+
+• Source in the repository: the add-on, hook and installer sources plus the current test build are now in [boommod-x/](boommod-x/).
+
+• Video memory (VRAM) options in the installer (Portuguese / English):
+
+• Variety - how many variations of each explosion may go to the GPU: Low (1 per type), Medium (2), High (all).
+
+• Load variations only when used - the first variation of each type loads at start; the others only the first time they are drawn at random.
+
+• Compression - Off, Half the memory (BC5, our own encoder) or One quarter (BC7).
+
+• The installer shows the estimated VRAM for the chosen settings.
+
+• Napalm ignites progressively: instead of the whole elongated strip lighting up at once, the fire now starts at the impact end and runs to the other end in about 0.75 s, along the direction the bomb was flying (r/hoggit feedback).
+
+• Per-explosion VRAM choice: the installer's new VRAM tab lets you pick, for each explosion type (JDAM, air burst, rocket, Mk-82, napalm, tank gun), Off or 1 to 5 variations, and adds up the video memory as you choose.
+
+• Variations: the add-on now accepts extra volumes per type (jdam_2.nzv, jdam_3.nzv, ...). The extra volumes themselves are not shipped yet.
+
+• Dust skirt (preview): a separate dust layer raised by the shock wave running along the ground, on top of the existing explosions. Offline preview only, not in the mod yet.
+
+• Blender: nightzim_boom add-on 0.2.0 opens the mod's .nzv volumes as animated OpenVDB volumes.
