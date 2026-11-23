@@ -2,7 +2,7 @@
 
 ## Nightzim BoomMod X - volumetric explosions for DCS World
 
-**Latest: BoomMod X v1.2.9** - OptiScaler/upscaler compatibility, VR fixes, nuclear dust without stripes. Download: https://github.com/fcirera/Nightzim-BoomMod/releases/latest
+**Latest: BoomMod X v1.3.0** - OptiScaler/upscaler compatibility, VR fixes, nuclear dust without stripes. Download: https://github.com/fcirera/Nightzim-BoomMod/releases/latest
 
 *Português abaixo.*
 
@@ -44,7 +44,7 @@ More: how it works and what every file does in [BoomModX.md](BoomModX.md), every
 
 BoomMod X desenha explosões simuladas em 3D dentro do jogo: um add-on do ReShade percorre volumes de explosão pré-calculados (simulação de fluido da onda, do fogo e da fumaça) por cima da imagem, usando a profundidade da cena, o sol e o vento da missão, e um hook Lua dispara as explosões a partir das bombas, foguetes, mísseis e tiros de tanque reais, no single player e no multiplayer.
 
-- **v1.2.9:** VR com upscaler (OptiScaler/DLSS/FSR) corrigido; compatibilidade com o OptiScaler (o instalador detecta e resolve o conflito do `dxgi.dll`; ver [docs/COMPATIBILIDADE.md](docs/COMPATIBILIDADE.md)); profundidade com DLSS/FSR/XeSS; no VR, rastro do SCUD sempre desenhado e nuke não gira mais 90°; poeira nuclear sem listras horizontais.
+- **v1.3.0:** VR com upscaler (OptiScaler/DLSS/FSR) corrigido; compatibilidade com o OptiScaler (o instalador detecta e resolve o conflito do `dxgi.dll`; ver [docs/COMPATIBILIDADE.md](docs/COMPATIBILIDADE.md)); profundidade com DLSS/FSR/XeSS; no VR, rastro do SCUD sempre desenhado e nuke não gira mais 90°; poeira nuclear sem listras horizontais.
 - **v1.2.7:** rastro de fumaça volumétrico próprio do SCUD e chama em cone de gás quente saindo do bocal; saia de poeira nuclear que cresce com a onda de choque (~4 km); opções do instalador enxutas; aba NOVIDADES no instalador; correção das atualizações.
 - **SCUD nuclear (11 kt):** clarão, efeitos de lente que giram com a cabeça, vista se readaptando, refração do ar e tranco na chegada da onda, cogumelo de 1,3 km e estrondo ouvido a 90 km.
 - **Explosões:** JDAM, Mk-82 e foguete (Novo Shader), explosão aérea, napalm e tiro de tanque, girando ao acaso e levadas pelo vento real.
@@ -132,6 +132,6 @@ Questions and suggestions are welcome. Discord ID: `999680611314831390`
 
 ## Status
 
-Classic line: version 3.2c. BoomMod X: v1.2.9. This repository contains the mod files and the installers. The simulation engine and the `.ffx` exporter are not published here.
+Classic line: version 3.2c. BoomMod X: v1.3.0. This repository contains the mod files and the installers. The simulation engine and the `.ffx` exporter are not published here.
 
 Not affiliated with Eagle Dynamics. DCS World is a trademark of its owner.

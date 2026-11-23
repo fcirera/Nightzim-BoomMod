@@ -32,8 +32,10 @@ namespace fs = std::filesystem;
 
 static const wchar_t *APP = L"Nightzim BoomMod X";
 static HWND g_wnd, g_path, g_log, g_chg;
-static Gdiplus::Bitmap *g_nov[3] = {};	// fotos da aba NOVIDADES (quadros dos videos de teste)
-static const int NOV_Y = 216;	// topo do texto da aba NOVIDADES (as fotos ficam acima)	// g_chg: notas de atualizacao (aba NOVIDADES)
+static const int NNOV = 6;
+static Gdiplus::Bitmap *g_nov[NNOV] = {}; static UINT g_novN[NNOV] = {};	// GIFs animados da aba NOVIDADES (trechos de 4 s dos videos de teste)
+static DWORD g_nov_t0 = 0;
+static const int NOV_Y = 352;	// topo do texto da aba NOVIDADES (as fotos ficam acima)	// g_chg: notas de atualizacao (aba NOVIDADES)
 // controles desenhados por nos (botao, chave liga/desliga, seletor segmentado, aba)
 enum { W_BTN, W_TOG, W_SEG, W_TAB, W_SLD };	// W_SLD: barra deslizante (value 0..opts.size()-1)
 struct Wd { int type = 0, page = 0, id = 0, value = 0, style = 0; Gdiplus::RectF r; std::wstring text; std::vector<std::wstring> opts; };
@@ -539,7 +541,7 @@ static void refresh_status()
 
 // ---------------------------------------------------------------- janela (interface propria, desenhada com GDI+)
 enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_TAB4, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH, ID_COMPAT };
-static const wchar_t *APP_VER = L"1.2.9"; static const UINT WM_UPD = WM_APP + 1;
+static const wchar_t *APP_VER = L"1.3.0"; static const UINT WM_UPD = WM_APP + 1;
 static int g_upd = 0; static std::wstring g_latest; static int g_bUpd = -1;	// g_upd: 0 verificando, 1 em dia, 2 ha versao nova, -1 sem resposta
 static bool g_pix = false; static Gdiplus::Bitmap *g_qr = nullptr, *g_icDisc = nullptr, *g_icInsta = nullptr, *g_icPix = nullptr;	// icones fornecidos pelo autor
 static const wchar_t *PIX_KEY = L"f5124246-e867-42ce-a16b-d139017560a5";
@@ -844,16 +846,21 @@ static void render(Bitmap &back)
 		spaced(g, T(L"EXPLOSÕES", L"EXPLOSIONS"), (float)X0, 80, 11.5f, C_MUT, 1.4f);
 		text(g, T(L"Valem na próxima vez que abrir o DCS.", L"They take effect next time you start DCS."), RectF((REAL)X0, CH - 62.f, W - 220, 42), 12.5f, C_MUT);
 	}
-	if (g_page == 4)	// NOVIDADES: tres fotos da versao atual em cima, notas embaixo
+	if (g_page == 4)	// NOVIDADES: seis GIFs animados (3 x 2) em cima, notas embaixo
 	{
-		const wchar_t *cap[3] = {T(L"Rastro do SCUD", L"SCUD smoke trail"), T(L"Chama no bocal", L"Flame at the nozzle"), T(L"Nuke 11 kt em Beirute", L"11 kt nuke over Beirut")};
+		const wchar_t *cap[NNOV] = {T(L"Clarão nuclear", L"Nuclear flash"), T(L"Onda de choque e poeira", L"Shock wave and dust"), T(L"Cogumelo nuclear", L"Nuclear mushroom"),
+			T(L"Lançamento do SCUD", L"SCUD launch"), T(L"Rastro de fumaça do SCUD", L"SCUD smoke trail"), T(L"Subida do SCUD", L"SCUD climb")};
 		float tw = (W - 16.f) / 3.f, th = tw * 9.f / 16.f;
-		for (int i = 0; i < 3; i++)
+		for (int i = 0; i < NNOV; i++)
 		{
-			float x = X0 + i * (tw + 8.f);
-			if (g_nov[i]) { g.SetInterpolationMode(InterpolationModeHighQualityBicubic); g.DrawImage(g_nov[i], RectF(x, 80.f, tw, th)); }
-			else fill_rr(g, RectF(x, 80.f, tw, th), 6, C_CARD);
-			text(g, cap[i], RectF(x, 84.f + th, tw, 18), 11.5f, C_MUT, 1);
+			float x = X0 + (i % 3) * (tw + 8.f), y = 80.f + (i / 3) * (th + 26.f);
+			if (g_nov[i])
+			{
+				if (g_novN[i] > 1) g_nov[i]->SelectActiveFrame(&FrameDimensionTime, ((GetTickCount() - g_nov_t0) / 83) % g_novN[i]);
+				g.SetInterpolationMode(InterpolationModeHighQualityBicubic); g.DrawImage(g_nov[i], RectF(x, y, tw, th));
+			}
+			else fill_rr(g, RectF(x, y, tw, th), 6, C_CARD);
+			text(g, cap[i], RectF(x, y + th + 3.f, tw, 18), 11.5f, C_MUT, 1);
 		}
 	}
 	if (g_page == 3)
@@ -1057,7 +1064,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 	{
 	case WM_ERASEBKGND: return 1;
 	case WM_UPD: upd_text(); InvalidateRect(h, nullptr, FALSE); return 0;
-	case WM_TIMER: KillTimer(h, 1); InvalidateRect(h, nullptr, FALSE); return 0;
+	case WM_TIMER: if (w == 2) { if (g_page == 4 && IsWindowVisible(h) && !IsIconic(h)) InvalidateRect(h, nullptr, FALSE); return 0; } KillTimer(h, 1); InvalidateRect(h, nullptr, FALSE); return 0;
 	case WM_PAINT: { PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); paint(dc); EndPaint(h, &ps); return 0; }
 	case WM_MOUSEMOVE:
 	{
@@ -1118,7 +1125,12 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int)
 	std::error_code ec;
 	{ HDC sdc = GetDC(nullptr); g_s = GetDeviceCaps(sdc, LOGPIXELSX) / 96.f; ReleaseDC(nullptr, sdc); }
 	for (int i = 0; i < 3; i++) g_hero[i] = load_res_img(101 + i);
-	for (int i = 0; i < 3; i++) g_nov[i] = load_res_img(110 + i);
+	for (int i = 0; i < NNOV; i++)
+	{
+		g_nov[i] = load_res_img(110 + i);
+		if (g_nov[i]) { UINT nd = g_nov[i]->GetFrameDimensionsCount(); if (nd) { GUID gid[4]; g_nov[i]->GetFrameDimensionsList(gid, std::min(nd, 4u)); g_novN[i] = g_nov[i]->GetFrameCount(&gid[0]); } }
+	}
+	g_nov_t0 = GetTickCount();
 	g_qr = load_res_img(104); g_icDisc = load_res_img(105); g_icInsta = load_res_img(106); g_icPix = load_res_img(107);
 
 	WNDCLASSW wc = {}; wc.lpfnWndProc = wndproc; wc.hInstance = hi; wc.lpszClassName = L"NZBX"; wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
@@ -1152,6 +1164,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int)
 		std::wstring cl = GetCommandLineW(); size_t k = cl.find(L"/shot ");
 		if (k != std::wstring::npos) { std::wstring pf = cl.substr(k + 6); while (!pf.empty() && (pf.back() == L' ' || pf.back() == L'"')) pf.pop_back(); save_shots(pf); return 0; }
 	}
+	SetTimer(g_wnd, 2, 83, nullptr);	// anima os GIFs da aba NOVIDADES
 	ShowWindow(g_wnd, SW_SHOW);
 	CloseHandle(CreateThread(nullptr, 0, update_thread, nullptr, 0, nullptr));	// verifica no GitHub se ha versao mais nova
 	MSG msg; while (GetMessageW(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
