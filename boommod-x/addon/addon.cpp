@@ -52,11 +52,12 @@ struct Config
 	float detail = 0.8f, detail_scale = 12.f, fire_gain = 0.6f, flame_min_t = 1450.f, edge_fade = 0.08f;
 	float fog_dist = 15000.f, fog_r = 0.62f, fog_g = 0.68f, fog_b = 0.76f, hold_s = 24.f, fade_end = 40.f, freeze_t = -1.f;
 	float night_ambient = 0.02f, night_fire = 1.5f, night_glow = 2.0f;	// noite: luz ambiente minima, ganho do fogo e da luz do fogo na fumaca
-	int vram_n[11] = {-1, -1, -1, -1, -1, -1, -1, 0, 0, 0, 0};	// variacoes por tipo escolhidas no instalador (0 = tipo desligado; -1 = usar vram_var)
+	int vram_n[12] = {-1, -1, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0};	// variacoes por tipo escolhidas no instalador (0 = tipo desligado; -1 = usar vram_var)
 	int vram_var = 2, vram_lazy = 1, vram_bc = 0;	// variacoes por tipo na VRAM, carregar so quando usar, comprimir (0 nao, 1 = metade/BC5, 2 = um quarto/BC7)
 	int vr_on = 1, vr_swap = 0, vr_log = 1; float vr_steps = 0.6f, vr_step_scale = 1.5f;	// VR: desenhar em cada olho; qualidade reduzida
 	int pod_on = 1, pod_min_draws = 40, pod_log = 1; float pod_max_fov = 12.f;	// pod: campo estreito (NFOV ~1,3 graus, WFOV ~4,5)
 	int reversed = 1, max_steps = 420, flip_right = 0, debug = 0, auto_calib = 1, depth_min_draws = 20;
+	int queda = 0; float queda_dur = 150.f, queda_escala = 0.6f;	// queda de aeronave (teste): 0 = desligada, 1..4 = variante A..D; duracao do incendio (s)
 	std::string nzv = "jdam.nzv";
 } cfg;
 
@@ -121,6 +122,9 @@ static void load_config()
 	c.vr_steps = ini_f("vr", "max_steps_scale", c.vr_steps); c.vr_step_scale = ini_f("vr", "step_scale", c.vr_step_scale);
 	c.pod_on = (int)ini_f("pod", "enabled", (float)c.pod_on); c.pod_min_draws = (int)ini_f("pod", "min_draws", (float)c.pod_min_draws);
 	c.pod_max_fov = ini_f("pod", "max_fov_deg", c.pod_max_fov); c.pod_log = (int)ini_f("pod", "log", (float)c.pod_log);
+	{ char b[16]; GetPrivateProfileStringA("instalador", "queda", "0", b, sizeof b, (g_dir + "NightzimBoom.ini").c_str()); char q = (char)toupper((unsigned char)b[0]); c.queda = (q >= 'A' && q <= 'D') ? q - 'A' + 1 : 0; c.vram_n[11] = c.queda ? 1 : 0; }
+	c.queda_dur = ini_f("queda", "duracao_s", c.queda_dur);
+	c.queda_escala = std::max(0.2f, std::min(1.5f, ini_f("queda", "escala", c.queda_escala)));
 	c.hold_s = ini_f("explosion", "hold_s", c.hold_s);
 	c.fade_end = ini_f("explosion", "fade_end_s", c.fade_end);
 	c.freeze_t = ini_f("explosion", "freeze_t", c.freeze_t);
@@ -162,10 +166,10 @@ static bool read_cam(Cam &c)
 }
 
 // ---------------------------------------------------------------- volume .nzv
-static const int NTYPES = 11;	// 10 = poeira levantada pela onda de choque nuclear (volume largo e baixo, nasce junto com a 9)	// 6 = JDAM classica (v1), usada no lugar da 0 quando escolhida; 7 = Mk-82 Novo Shader (entra no sorteio da 3)
-static const char *TYPE_FILE[NTYPES] = {"jdam.nzv", "aerea.nzv", "nar.nzv", "mk82.nzv", "napalm.nzv", "tank.nzv", "jdam_v1.nzv", "mk82n.nzv", "narn.nzv", "nuke.nzv", "nuke_dust.nzv"};
-static const char *TYPE_NAME[NTYPES] = {"JDAM", "aerea", "pequena", "media", "napalm", "tanque", "JDAM classica", "media novo shader", "pequena novo shader", "nuclear", "poeira nuclear"};
-static const bool TYPE_GROUND[NTYPES] = {true, false, true, true, true, true, true, true, true, true, true};
+static const int NTYPES = 12;	// 11 = queda de aeronave no solo (teste): queda_A..D.nzv, escolhida no instalador	// 10 = poeira levantada pela onda de choque nuclear (volume largo e baixo, nasce junto com a 9)	// 6 = JDAM classica (v1), usada no lugar da 0 quando escolhida; 7 = Mk-82 Novo Shader (entra no sorteio da 3)
+static const char *TYPE_FILE[NTYPES] = {"jdam.nzv", "aerea.nzv", "nar.nzv", "mk82.nzv", "napalm.nzv", "tank.nzv", "jdam_v1.nzv", "mk82n.nzv", "narn.nzv", "nuke.nzv", "nuke_dust.nzv", "queda.nzv"};
+static const char *TYPE_NAME[NTYPES] = {"JDAM", "aerea", "pequena", "media", "napalm", "tanque", "JDAM classica", "media novo shader", "pequena novo shader", "nuclear", "poeira nuclear", "queda de aeronave"};
+static const bool TYPE_GROUND[NTYPES] = {true, false, true, true, true, true, true, true, true, true, true, true};
 static const int MAXV = 6;	// variacoes por tipo: jdam.nzv, jdam_2.nzv ... (ate 5; o Mk-82 Novo Shader vai ate 6)
 
 struct Volume
@@ -181,6 +185,7 @@ static int g_nvar[NTYPES];	// variacoes existentes e permitidas (>= 1 se o arqui
 #define VOL(I) vols[(I).type * MAXV + (I).var]
 static std::string vol_file(int type, int var)
 {
+	if (type == 11) { char q[32]; snprintf(q, sizeof q, "queda_%c.nzv", 'A' + std::max(1, std::min(4, cfg.queda)) - 1); return q; }
 	std::string f = TYPE_FILE[type];
 	if (var > 0) f = f.substr(0, f.size() - 4) + "_" + std::to_string(var + 1) + ".nzv";
 	return f;
@@ -238,6 +243,12 @@ static bool load_volume(ID3D11Device *dev, int type, int var = 0)
 	for (int k = 0; k < 5; k++) vol.mx[k] = ff[4 + k];
 	vol.t_end = ff[11];
 	vol.times.resize(vol.nf); fread(vol.times.data(), 4, vol.nf, f);
+	if (type == 11)	// queda de aeronave: tamanho ajustavel ([queda] escala); o tempo acompanha a raiz do tamanho (empuxo) e a fuligem fica mais densa para a opacidade nao mudar
+	{
+		float sc = cfg.queda_escala, st = sqrtf(sc);
+		vol.dx *= sc; for (int k = 0; k < 3; k++) vol.burst[k] *= sc;
+		vol.mx[0] /= sc; vol.t_end *= st; for (auto &tt : vol.times) tt *= st;
+	}
 	size_t n = (size_t)vol.nx * vol.ny * vol.nz * 4;
 	std::vector<unsigned char> buf(n);
 	D3D11_TEXTURE3D_DESC td = {}; td.Width = vol.nx; td.Height = vol.ny; td.Depth = vol.nz; td.MipLevels = 1;
@@ -921,11 +932,24 @@ static bool we_are_foreground()
 	return pid == GetCurrentProcessId();
 }
 
+
+// queda de aeronave: depois do fim do volume, o incendio continua em laco (ultimos segundos), com duas fases cruzadas para nao dar salto
+static int queda_plan(const Volume &vol, double t, double tt[2], float ff[2])
+{
+	double P = std::min(4.2, vol.t_end * 0.4), L0 = vol.t_end - P, Ls = L0 + 0.5 * P;
+	if (t < Ls) { tt[0] = t; ff[0] = 1.f; return 1; }
+	double over = t - vol.t_end - cfg.queda_dur; float fall = over > 0 ? (float)std::max(0.0, 1.0 - over / 45.0) : 1.f;
+	if (fall <= 0.f) return 0;
+	double a = (t - L0) / P; a -= floor(a); double b = a + 0.5; b -= floor(b);
+	tt[0] = L0 + P * a; ff[0] = fall * (float)(1.0 - fabs(2.0 * a - 1.0));
+	tt[1] = L0 + P * b; ff[1] = fall * (float)(1.0 - fabs(2.0 * b - 1.0));
+	return 2;
+}
 static void request_spawn(int type)
 {
 	bool pronto = vols[type * MAXV].ready || (type == 3 && vols[7 * MAXV].ready) || (type == 2 && vols[8 * MAXV].ready);	// o Novo Shader atende o atalho da Mk-82 / foguete
 	if (!pronto) { logf("explosao %s ainda carregando ou ausente", TYPE_NAME[type]); return; }
-	g_sh->spawn_distance = cfg.dist[type]; g_sh->spawn_req_type = type;
+	g_sh->spawn_distance = type < 6 ? cfg.dist[type] : 450.f; g_sh->spawn_req_type = type;
 	MemoryBarrier();
 	InterlockedIncrement(&g_sh->spawn_req);
 	logf("pedido de explosao %s", TYPE_NAME[type]);
@@ -934,6 +958,11 @@ static void request_spawn(int type)
 
 static void handle_keys()
 {
+	if (cfg.queda)	// teste da queda de aeronave: Ctrl+Shift+Q (vale mesmo sem o modo dev)
+	{
+		bool m2 = (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_SHIFT) & 0x8000) && we_are_foreground();
+		if (key_edge('Q') && m2) request_spawn(11);
+	}
 	if (!cfg.dev) return;	// versao publica: sem atalhos
 	bool mod = (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_SHIFT) & 0x8000) && we_are_foreground();
 	int keys[] = {'B', 'Z', 'X', 'C', 'V', 'N', 'K', 'D', 'R', VK_END, 'F', VK_PRIOR, VK_NEXT, 'L'};
@@ -977,6 +1006,7 @@ static void poll_shared()
 		bool novoN = e.type == 2 && g_nvar[8] > 0 && vols[8 * MAXV].ready;	// Foguete Novo Shader disponivel
 		if (e.type >= 0 && e.type < 6 && cfg.vram_n[e.type] == 0 && !novo && !novoN) continue;	// tipo desligado pelo usuario: sem explosao
 		int ty = (e.type >= 0 && e.type < 6 && vols[e.type * MAXV].ready) ? e.type : 0;
+		if (e.type == 11) { if (!cfg.queda || !vols[11 * MAXV].ready) continue; ty = 11; }	// queda de aeronave (teste): sem o volume, nada
 		if (e.type == 9 && cfg.moab_nuke && vols[9 * MAXV].ready) ty = 9;	// GBU-43 MOAB (o hook manda o tipo 9); sem a opcao, vira JDAM
 		if (novo || novoN)
 		{
@@ -1012,12 +1042,13 @@ static void poll_shared()
 		static uint32_t rs = GetTickCount() * 2654435761u;
 		auto rnd = [&]() { rs ^= rs << 13; rs ^= rs >> 17; rs ^= rs << 5; return (rs & 0xffffff) / 16777216.f; };
 		I.yaw = rnd() * 6.2831853f; I.mirror = rnd() < 0.5f; I.rate = 0.9f + 0.2f * rnd();
-		if (e.fixed) { I.yaw = e.yaw; I.mirror = false; }	// tiro de tanque: o jato sai na direcao do cano
+		if (e.fixed) { I.yaw = e.yaw; I.mirror = false; }
+		if (ty == 11) { I.rate = 1.f; logf("queda de aeronave: criada em %.0f %.0f %.0f (t=%.1f, %s), escala %.2f", e.p[0], e.p[1], e.p[2], e.t, e.pad ? "aeronave real" : "atalho", cfg.queda_escala); }	// tiro de tanque: o jato sai na direcao do cano
 		I.wind[0] = cfg.wind_on ? e.wx * cfg.wind_gain : 0.f; I.wind[1] = cfg.wind_on ? e.wz * cfg.wind_gain : 0.f;
 		// destrocos com rastro de fumaca (so explosoes no chao com fragmentos)
 		{
-			static const int NT[11] = {14, 0, 5, 10, 0, 5, 14, 10, 5, 0, 0};
-			static const float VMIN[11] = {70, 0, 30, 50, 0, 25, 70, 50, 30, 0, 0}, VMAX[11] = {150, 0, 60, 110, 0, 50, 150, 110, 60, 0, 0}, SZ[11] = {1.3f, 0, 0.5f, 1.0f, 0, 0.5f, 1.3f, 1.0f, 0.5f, 0, 0};
+			static const int NT[12] = {14, 0, 5, 10, 0, 5, 14, 10, 5, 0, 0, 0};
+			static const float VMIN[12] = {70, 0, 30, 50, 0, 25, 70, 50, 30, 0, 0, 0}, VMAX[12] = {150, 0, 60, 110, 0, 50, 150, 110, 60, 0, 0, 0}, SZ[12] = {1.3f, 0, 0.5f, 1.0f, 0, 0.5f, 1.3f, 1.0f, 0.5f, 0, 0, 0};
 			I.ntr = cfg.debris_on ? NT[ty] : 0; I.tr_end = 0;
 			for (int k = 0; k < I.ntr; k++)
 			{
@@ -1569,6 +1600,8 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 		float hold = std::min(cfg.hold_s, VOL(I).t_end + 0.5f), fend = hold + (cfg.fade_end - cfg.hold_s);
 		if (I.type >= 9) { hold = VOL(I).t_end + 20.f; fend = hold + 45.f; }
 		float fade = t > hold ? (float)std::max(0.0, 1.0 - (t - hold) / std::max(0.1f, fend - hold)) : 1.f;
+		double qt[2] = {t, t}; float qf[2] = {1.f, 0.f}; int qn = 1;
+		if (I.type == 11) { qn = t < 0 ? 1 : queda_plan(VOL(I), t, qt, qf); fade = qn ? 1.f : 0.f; }
 		if (fade <= 0.f) { I.on = false; continue; }
 		g_have_spawn = true;
 		g_volume = cfg.volume;
@@ -1580,11 +1613,12 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 			{
 				I.snd = true;
 				double rr = (dx * cam.z[0] + dy * cam.z[1] + dz * cam.z[2]) / std::max(dist, 1.0);
-				if (dist < (I.type == 9 ? 90000 : 20000)) play_sound(I.type == 6 ? 0 : I.type == 7 ? 3 : I.type == 8 ? 2 : I.type == 9 ? 0 : I.type, (float)dist, (float)std::max(-1.0, std::min(1.0, rr)));
+				if (dist < (I.type == 9 ? 90000 : 20000)) play_sound(I.type == 6 ? 0 : I.type == 7 ? 3 : I.type == 8 ? 2 : I.type == 9 ? 0 : I.type == 11 ? 4 : I.type, (float)dist, (float)std::max(-1.0, std::min(1.0, rr)));
 			}
 		}
 		if (t < 0) continue;
 		double dx = cam.p[0] - I.p[0], dy = cam.p[1] - I.p[1], dz = cam.p[2] - I.p[2];
+		if (I.type == 11) { for (int q = 0; q < qn; q++) if (qf[q] > 0.004f) jobs.push_back({k, qt[q], qf[q], dx * dx + dy * dy + dz * dz + q}); continue; }
 		jobs.push_back({k, t, fade, dx * dx + dy * dy + dz * dz + (I.type == 10 ? 1e14 : 0.0)});	// poeira da nuke sempre por baixo (desenhada antes do cogumelo)
 	}
 	if (!g_pl.empty()) g_have_spawn = true;	// rastro de missil no ar: as passadas de desenho continuam
@@ -1704,8 +1738,9 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 		ID3D11RenderTargetView *nrt = nullptr; G.ctx->OMSetRenderTargets(1, &nrt, nullptr);
 	}
 	// ondas de choque (depois da fumaca, para dobrar tambem a fumaca atras delas)
-	static const float WILSON[11] = {0.8f, 0.5f, 0.f, 0.35f, 0.f, 0.f, 0.8f, 0.35f, 0.f, 0.f, 0.f};
-	float SHOCK_AMP[11]; SHOCK_AMP[10] = 0.f; for (int k = 0; k < 6; k++) SHOCK_AMP[k] = 3.0f * cfg.shock_type[k];
+	static const float WILSON[12] = {0.8f, 0.5f, 0.f, 0.35f, 0.f, 0.f, 0.8f, 0.35f, 0.f, 0.f, 0.f, 0.f};
+	float SHOCK_AMP[12]; SHOCK_AMP[10] = 0.f; SHOCK_AMP[11] = 0.2f;	// queda: deflagracao de querosene, onda fraca
+	 for (int k = 0; k < 6; k++) SHOCK_AMP[k] = 3.0f * cfg.shock_type[k];
 	SHOCK_AMP[6] = SHOCK_AMP[0]; SHOCK_AMP[7] = SHOCK_AMP[3]; SHOCK_AMP[8] = SHOCK_AMP[2]; SHOCK_AMP[9] = 0.f;	// a nuke tem a onda propria (ps_nshock)
 	float shock_gain = g_sh->opt_shock >= 0 ? g_sh->opt_shock : cfg.shock_gain;
 	for (const Job &J : jobs)
@@ -1810,6 +1845,8 @@ static void pod_inject(ID3D11DeviceContext *ctx, ID3D11Resource *dsv, ID3D11Rend
 		float hold = std::min(cfg.hold_s, vol.t_end + 0.5f), fend = hold + (cfg.fade_end - cfg.hold_s);
 		if (I.type >= 9) { hold = vol.t_end + 20.f; fend = hold + 45.f; }
 		float fade = t > hold ? (float)std::max(0.0, 1.0 - (t - hold) / std::max(0.1f, fend - hold)) : 1.f;
+		double qt[2] = {t, t}; float qf[2] = {1.f, 0.f}; int qn = 1;
+		if (I.type == 11) { qn = queda_plan(vol, t, qt, qf); fade = qn ? 1.f : 0.f; }
 		if (fade <= 0.f) continue;
 		// fora do campo de visao do pod? (centro da nuvem e raio da caixa)
 		double c[3] = {I.p[0] - cam.p[0], I.p[1] + 0.35 * vol.nz * vol.dx - cam.p[1], I.p[2] - cam.p[2]};
@@ -1818,6 +1855,7 @@ static void pod_inject(ID3D11DeviceContext *ctx, ID3D11Resource *dsv, ID3D11Rend
 		double cosa = (c[0] * cam.x[0] + c[1] * cam.x[1] + c[2] * cam.x[2]) / std::max(d, 1.0);
 		double ang = acos(std::max(-1.0, std::min(1.0, cosa))), angr = d > R ? asin(R / d) : 3.2;
 		if (ang > diag + angr) continue;
+		if (I.type == 11) { for (int q = 0; q < qn; q++) if (qf[q] > 0.004f) jobs.push_back({k, qt[q], qf[q], d * d + q}); continue; }
 		jobs.push_back({k, t, fade, d * d + (I.type == 10 ? 1e14 : 0.0)});
 	}
 	if (jobs.empty()) return;
@@ -1875,12 +1913,85 @@ static void pod_inject(ID3D11DeviceContext *ctx, ID3D11Resource *dsv, ID3D11Rend
 	if (cfg.pod_log && GetTickCount() - told > 10000) { told = GetTickCount(); logf("pod de mira: %zu explosao(oes) desenhada(s) na imagem do pod (%ux%u fmt %d, fov %.2f graus)", jobs.size(), rd.Width, rd.Height, (int)rd.Format, atanf(tanv) * 114.5916f); }
 }
 
+
+// ---------------------------------------------------------------- VR: pose da cabeca estavel (v31)
+// A camera de cada olho vem do buffer do jogo e as vezes e velha, de outra vista ou com eixos trocados; a posicao vem do Lua
+// (30-60 Hz) enquanto o VR desenha a 80-90 Hz. Aqui: (1) guarda a rotacao da cabeca RELATIVA a camera do Lua e a velocidade
+// angular; (2) descarta capturas que saltam demais e usa a ultima boa + deslocamento do Lua + extrapolacao curta; (3) interpola
+// a posicao do Lua entre os ticks pela velocidade.
+static double qpc_s() { static LARGE_INTEGER f = {}; if (!f.QuadPart) QueryPerformanceFrequency(&f); LARGE_INTEGER c; QueryPerformanceCounter(&c); return (double)c.QuadPart / (double)f.QuadPart; }
+struct HeadSt { bool ok = false; float c[3][3] = {}, vel[3][3] = {}, len[3] = {1, 1, 1}; double tq = 0; };
+static HeadSt g_head[2];
+static void head_filter(int idx, const Cam &lua, VP3 &vp)
+{
+	if (idx < 0 || idx > 1) return;
+	HeadSt &H = g_head[idx];
+	const double *Lb[3] = {lua.x, lua.y, lua.z};	// frente, cima, direita do Lua
+	float *V[3] = {vp.A, vp.B, vp.C};			// frente, direita, cima da camera lida
+	double tn = qpc_s(); float c[3][3], ln[3];
+	for (int i = 0; i < 3; i++)
+	{
+		ln[i] = vlen3(V[i]);
+		for (int j = 0; j < 3; j++) c[i][j] = (float)(V[i][0] * Lb[j][0] + V[i][1] * Lb[j][1] + V[i][2] * Lb[j][2]);
+	}
+	bool accept = true; double dt = tn - H.tq; float ang = 0.f;
+	if (H.ok && ln[0] > 1e-6f)
+	{
+		float pr[3]; double ex = std::min(dt, 0.2);
+		for (int j = 0; j < 3; j++) pr[j] = H.c[0][j] + H.vel[0][j] * (float)ex;
+		float lp = vlen3(pr); if (lp > 1e-6f) { float d = (c[0][0] * pr[0] + c[0][1] * pr[1] + c[0][2] * pr[2]) / (ln[0] * lp); ang = acosf(std::max(-1.f, std::min(1.f, d))) * 57.29578f; }
+		float lim = (float)std::min(70.0, std::max(8.0, 600.0 * dt));
+		if (ang > lim && dt < 1.5) accept = false;
+	}
+	static DWORD tl = 0; static int nrej = 0;
+	if (accept)
+	{
+		if (H.ok && dt > 1e-4 && dt < 0.1) for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) H.vel[i][j] = 0.5f * H.vel[i][j] + 0.5f * (c[i][j] - H.c[i][j]) / (float)dt;
+		else memset(H.vel, 0, sizeof H.vel);
+		memcpy(H.c, c, sizeof c); for (int i = 0; i < 3; i++) H.len[i] = ln[i]; H.tq = tn; H.ok = true;
+		return;
+	}
+	nrej++;
+	float o[3][3];
+	if (dt > 1.0)
+	{ memset(o, 0, sizeof o); o[0][0] = H.len[0]; o[1][2] = H.len[1]; o[2][1] = H.len[2]; }	// cabeca perdida ha muito tempo: Lua puro
+	else
+	{
+		float ex = (float)std::min(dt, 0.2);
+		for (int i = 0; i < 3; i++)
+		{
+			for (int j = 0; j < 3; j++) o[i][j] = H.c[i][j] + H.vel[i][j] * ex;
+			float l = vlen3(o[i]); if (l > 1e-6f) for (int j = 0; j < 3; j++) o[i][j] *= H.len[i] / l;
+		}
+	}
+	for (int i = 0; i < 3; i++) for (int k = 0; k < 3; k++) V[i][k] = (float)(o[i][0] * Lb[0][k] + o[i][1] * Lb[1][k] + o[i][2] * Lb[2][k]);
+	if (GetTickCount() - tl > 5000) { tl = GetTickCount(); logf("VR: captura da camera do olho %d saltou %.0f graus (idade %.0f ms); usando a ultima pose da cabeca + Lua (%d vezes)", idx, ang, dt * 1000.0, nrej); nrej = 0; }
+}
+static struct { bool ok = false; double p[3] = {}, v[3] = {}, tq = 0; } g_lp;
+static void pos_filter(Cam &cam)
+{
+	double tn = qpc_s();
+	if (!g_lp.ok) { memcpy(g_lp.p, cam.p, 24); g_lp.tq = tn; g_lp.ok = true; return; }
+	bool ch = false; for (int i = 0; i < 3; i++) if (fabs(cam.p[i] - g_lp.p[i]) > 1e-9) ch = true;
+	if (ch)
+	{
+		double dt = tn - g_lp.tq;
+		for (int i = 0; i < 3; i++) g_lp.v[i] = (dt > 0.002 && dt < 0.2) ? (cam.p[i] - g_lp.p[i]) / dt : 0.0;
+		memcpy(g_lp.p, cam.p, 24); g_lp.tq = tn;
+	}
+	else
+	{
+		double ex = std::min(tn - g_lp.tq, 0.05);
+		for (int i = 0; i < 3; i++) cam.p[i] = g_lp.p[i] + g_lp.v[i] * ex;
+	}
+}
 // ---------------------------------------------------------------- VR: desenha as explosoes na imagem final de um olho
 static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *rtv, int idx)
 {
 	if (!g_sh || !G.ok || !G.ps[0] || !g_have_spawn || !rtv) return;
 	Cam cam;
 	if (!read_cam(cam)) return;
+	pos_filter(cam);
 	ID3D11Resource *rr = nullptr; rtv->GetResource(&rr);
 	if (!rr) return;
 	ID3D11Texture2D *rt = nullptr; D3D11_TEXTURE2D_DESC rd = {};
@@ -1909,8 +2020,11 @@ static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *
 		float hold = std::min(cfg.hold_s, vol.t_end + 0.5f), fend = hold + (cfg.fade_end - cfg.hold_s);
 		if (I.type >= 9) { hold = vol.t_end + 20.f; fend = hold + 45.f; }
 		float fade = t > hold ? (float)std::max(0.0, 1.0 - (t - hold) / std::max(0.1f, fend - hold)) : 1.f;
+		double qt[2] = {t, t}; float qf[2] = {1.f, 0.f}; int qn = 1;
+		if (I.type == 11) { qn = queda_plan(vol, t, qt, qf); fade = qn ? 1.f : 0.f; }
 		if (fade <= 0.f) continue;
 		double dx = cam.p[0] - I.p[0], dy = cam.p[1] - I.p[1], dz = cam.p[2] - I.p[2];
+		if (I.type == 11) { for (int q = 0; q < qn; q++) if (qf[q] > 0.004f) jobs.push_back({k, qt[q], qf[q], dx * dx + dy * dy + dz * dz + q}); continue; }
 		jobs.push_back({k, t, fade, dx * dx + dy * dy + dz * dz + (I.type == 10 ? 1e14 : 0.0)});	// poeira da nuke sempre por baixo (desenhada antes do cogumelo)
 	}
 	if (jobs.empty() && g_pl.empty()) return;	// rastro de missil sozinho no ar tambem e desenhado no VR
@@ -1950,6 +2064,7 @@ static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *
 			}
 		}
 	}
+	head_filter(idx, cam, vp);
 	for (int i = 0; i < 3; i++) { cam.x[i] = vp.A[i]; cam.z[i] = vp.B[i]; cam.y[i] = vp.C[i]; }
 	float nearm = vp.nearv > 0.f ? vp.nearv : 0.02f;
 	CB cb = {};

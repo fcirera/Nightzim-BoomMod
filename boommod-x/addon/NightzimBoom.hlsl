@@ -270,7 +270,7 @@ float4 ps_main(VSOut i) : SV_Target
 		float stepm = dt * dl;
 		float wgt = 1.0 - exp(-s * stepm);
 		col += tr * wgt * S;
-		if (fl > 1e-4) col += FLK * detail.w * fl * stepm * tr * planck3(max(temp, detail2.x));
+		if (fl > 1e-4) col += FLK * detail.w * fl * min(1.0, scales.w) * stepm * tr * planck3(max(temp, detail2.x));	// a chama acompanha a opacidade (laco cruzado do incendio da queda)
 		tr *= 1.0 - wgt;
 		t += dt;
 	}

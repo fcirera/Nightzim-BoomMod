@@ -231,6 +231,65 @@ tank_shots = function(t, shells, all)
 	for id, e in pairs(cb.sh) do if not shells[id] and t - e.t > 1 then cb.sh[id] = nil end end
 end
 
+-- queda de aeronave (teste): uma explosao por queda, venha do Export (aviao inteiro que bate) ou do evento da missao (destroco de aviao abatido)
+local function crash_spawn(x, z, t, vx, vz, origem)
+	cb.crashes = cb.crashes or {}
+	local keep = {}
+	for _, c in ipairs(cb.crashes) do
+		if t - c.t < 8 and t >= c.t then
+			keep[#keep + 1] = c
+			if (c.x - x) ^ 2 + (c.z - z) ^ 2 < 400 * 400 then cb.crashes = keep; L("queda de aeronave repetida (" .. origem .. "): ignorada"); return end
+		end
+	end
+	keep[#keep + 1] = {x = x, z = z, t = t}; cb.crashes = keep
+	local y = ground(x, z)
+	local wx, wz = wind_at(x, y, z)
+	if vx and (vx * vx + vz * vz) > 9 then nz.spawn(x, y, z, t, 11, 1, wx, wz, math.atan2(vz, vx)) else nz.spawn(x, y, z, t, 11, 1, wx, wz) end
+	sun_update(x, z, t)
+	L(string.format("queda de aeronave (%s) em x=%.1f y=%.1f z=%.1f", origem, x, y, z))
+end
+
+-- acompanha avioes e helicopteros pelo Export; se um some rapido e rente ao chao, bateu
+local function crash_step(t, planes)
+	cb.air = cb.air or {}
+	for id, o in pairs(planes) do
+		local p, e = o.Position, cb.air[id]
+		if e then
+			local dt = t - e.t
+			if dt > 1e-3 then
+				e.v = {x = (p.x - e.p.x) / dt, y = (p.y - e.p.y) / dt, z = (p.z - e.p.z) / dt}
+				e.p = {x = p.x, y = p.y, z = p.z}; e.t = t
+			end
+		else
+			cb.air[id] = {p = {x = p.x, y = p.y, z = p.z}, t = t, name = o.Name}
+		end
+	end
+	for id, e in pairs(cb.air) do
+		if not planes[id] then
+			cb.air[id] = nil
+			local v, gap = e.v, t - e.t
+			if v and gap >= 0 and gap < 1.0 then
+				local sp = math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+				local agl = e.p.y - ground(e.p.x, e.p.z)
+				local x, z, hit = e.p.x, e.p.z, false
+				if v.y < -1 then
+					local k, lim = 0, math.min(gap + 0.5, 2.0)
+					while k <= lim do
+						local px, py, pz = e.p.x + v.x * k, e.p.y + v.y * k, e.p.z + v.z * k
+						if py <= ground(px, pz) + 2 then x, z = px, pz; hit = true; break end
+						k = k + 0.02
+					end
+				end
+				L(string.format("aeronave %s sumiu: %.0f m acima do chao, %.0f m/s (vertical %.0f), chao projetado: %s", tostring(e.name), agl, sp, v.y, tostring(hit)))
+				if sp > 30 and (hit or agl < 25) then
+					local hs = math.sqrt(v.x * v.x + v.z * v.z)
+					crash_spawn(x, z, t, v.x, v.z, "export, " .. tostring(e.name) .. string.format(", mergulho %.0f graus", math.deg(math.atan2(-v.y, math.max(hs, 0.1)))))
+				end
+			end
+		end
+	end
+end
+
 -- multiplayer: acompanha as armas em voo pelo Export e marca o impacto quando somem
 local function ballistic_step(t)
 	if not Export.LoGetWorldObjects then return end
@@ -240,9 +299,10 @@ local function ballistic_step(t)
 	local objs
 	if all then
 		objs = {}
-		local shells, units = {}, nil
+		local shells, units, planes = {}, nil, {}
 		for id, o in pairs(all) do
 			local ty = o.Type
+			if ty and ty.level1 == 1 and o.Position then planes[id] = o end
 			if ty and ty.level1 == 4 and ty.level2 == 6 and o.Position then shells[id] = o end
 			if ty and ty.level1 == 4 and ty.level2 ~= 6 then
 				objs[id] = o
@@ -255,6 +315,7 @@ local function ballistic_step(t)
 		end
 		if not cb.bal_info then cb.bal_info = true; L("export de objetos ativo no servidor") end
 		tank_shots(t, shells, all)
+		pcall(crash_step, t, planes)
 	end
 	if not objs then
 		if not cb.bal_warned then cb.bal_warned = true; L("o servidor nao permite exportar objetos: so as explosoes pelos atalhos") end
@@ -371,6 +432,7 @@ function cb.onSimulationFrame()
 			else
 			local wx, wz = wind_at(x, y, z)
 			if typ == 5 or typ == 4 then nz.spawn(x, y, z, t, typ, 0, wx, wz, math.atan2(fz, fx))	-- tanque e napalm: para longe da camera
+			elseif typ == 11 then nz.spawn(x, y, z, t, typ, 0, wx, wz, math.atan2(fz, fx) + math.pi / 2)	-- queda de aeronave (teste): de lado para a camera
 			else nz.spawn(x, y, z, t, typ, 0, wx, wz) end
 			-- som original do DCS: uma explosao "de verdade" do jogo no mesmo ponto (o visual dela esta em branco).
 			-- So no ambiente de script da missao (single player / missao propria). Potencia em kg de TNT por tipo.
@@ -418,6 +480,16 @@ function cb.onSimulationFrame()
 					nz.spawn(x, y, z, t, ty, 1, wx, wz)
 					sun_update(x, z, t)
 					L(string.format("impacto real tipo %d em x=%.1f y=%.1f z=%.1f", ty, x, y, z))
+				end
+			end
+		end
+
+		-- quedas vistas pelo script da missao (S_EVENT_CRASH: inclui o destroco do aviao abatido, que o Export nao mostra)
+		if cb.injected and cb.n % 3 == 1 then
+			local q = net.dostring_in(cb.state or "scripting", "return nzc_pop and nzc_pop() or ''")
+			if q and q ~= "" then
+				for x, z, vx, vz in string.gmatch(q, "([%-%d%.]+),([%-%d%.]+),([%-%d%.]+),([%-%d%.]+)") do
+					crash_spawn(tonumber(x), tonumber(z), t, tonumber(vx), tonumber(vz), "evento da missao")
 				end
 			end
 		end
@@ -470,8 +542,21 @@ if not nzq_installed then
 				tracked[#tracked + 1] = {w = e.weapon, ty = classify(e.weapon)}
 			end
 		end
+		-- queda de aeronave: o destroco tocou o chao
+		if e.id == world.event.S_EVENT_CRASH and e.initiator then
+			pcall(function()
+				local p = e.initiator:getPoint(); local v = {x = 0, y = 0, z = 0}
+				pcall(function() v = e.initiator:getVelocity() end)
+				local nome = "?"; pcall(function() nome = e.initiator:getTypeName() end)
+				local agl = p.y - land.getHeight({x = p.x, y = p.z})
+				env.info(string.format("NIGHTZIM: S_EVENT_CRASH %s a %.0f m do chao, vel %.0f %.0f %.0f", tostring(nome), agl, v.x, v.y, v.z))
+				if agl < 60 then nzc[#nzc + 1] = string.format("%.1f,%.1f,%.1f,%.1f", p.x, p.z, v.x, v.z) end
+			end)
+		end
 	end
 	world.addEventHandler(h)
+	nzc = {}
+	nzc_pop = function() local s = table.concat(nzc, ";"); nzc = {}; return s end
 	local function tick(_, t)
 		local keep = {}
 		for _, o in ipairs(tracked) do

@@ -40,7 +40,7 @@ static const int NOV_Y = 352;	// topo do texto da aba NOVIDADES (as fotos ficam 
 enum { W_BTN, W_TOG, W_SEG, W_TAB, W_SLD };	// W_SLD: barra deslizante (value 0..opts.size()-1)
 struct Wd { int type = 0, page = 0, id = 0, value = 0, style = 0; Gdiplus::RectF r; std::wstring text; std::vector<std::wstring> opts; };
 static std::vector<Wd> g_w;
-static int g_cJdam, g_cMoab, g_cCor, g_cQual, g_cDet, g_kShock, g_kWilson, g_kWind, g_kStock, g_cVar, g_kLazy, g_kBC, g_sMax;	// indices em g_w
+static int g_cJdam, g_cMoab, g_cCor, g_cQual, g_cDet, g_kShock, g_kWilson, g_kWind, g_kStock, g_cVar, g_kLazy, g_kBC, g_sMax, g_cQueda;	// indices em g_w
 static int g_cN[8];	// variacoes por tipo de explosao (0 = desligada)
 static const wchar_t *N_FILE[8] = {L"jdam", L"aerea", L"nar", L"mk82", L"napalm", L"tank", L"mk82n", L"narn"}, *N_KEY[8] = {L"n_jdam", L"n_aerea", L"n_pequena", L"n_media", L"n_napalm", L"n_tanque", L"n_mk82n", L"n_narn"};
 static int g_page = 0, g_state = 0, g_hover_part = 0;	// g_state: -1 sem DCS, 0 nao instalado, 1 ativo, 2 desativado
@@ -372,6 +372,7 @@ static void load_options()
 		for (int i = 0; i < 8; i++) { int n = _wtoi(f(L"vram", N_KEY[i], std::to_wstring(i == 2 || i == 3 ? 0 : i == 6 ? 6 : i == 7 ? 4 : def).c_str()).c_str()); int mx = i == 6 ? 6 : i == 7 ? 4 : 5; if (i == 2 || i == 3) n = 0; setsel(g_cN[i], n < 0 ? 0 : n > mx ? mx : n); }
 	}
 	setchk(g_kLazy, _wtoi(f(L"vram", L"sob_demanda", L"1").c_str()) != 0);
+	{ std::wstring q = f(L"instalador", L"queda", L"0"); wchar_t c = q.empty() ? L'0' : (wchar_t)towupper(q[0]); setsel(g_cQueda, (c >= L'A' && c <= L'D') ? c - L'A' + 1 : 0); }
 	{ int n = _wtoi(f(L"explosion", L"max_simultaneas", L"30").c_str()); setsel(g_sMax, n < 0 ? 0 : n > 50 ? 50 : n); }
 	{ int c = _wtoi(f(L"vram", L"comprimir", L"0").c_str()); setsel(g_kBC, c < 0 || c > 2 ? 0 : c); }
 	update_vram_label();
@@ -415,6 +416,19 @@ static void apply_options()
 	std::wstring mv = sel(g_cMoab) == 1 ? L"jdam" : L"nuke";
 	log(L"SCUD: " + std::wstring(mv == L"nuke" ? T(L"Nuke 11kt (teste)", L"Nuke 11kt (test)") : T(L"igual a JDAM", L"same as JDAM")));
 	ini_set(L"instalador", L"scud", mv);
+	{	// queda de aeronave (teste): Nao ou uma das 4 variantes (A rasante, B mergulho, C baixa energia, D obliquo + secundaria)
+		int q = sel(g_cQueda); const wchar_t *qs[5] = {L"0", L"A", L"B", L"C", L"D"};
+		const wchar_t *qn[5] = {L"", T(L"A - Rasante (raso e rápido)", L"A - Shallow and fast"), T(L"B - Mergulho (quase vertical)", L"B - Steep dive"), T(L"C - Baixa energia (pouso forçado)", L"C - Low energy (forced landing)"), T(L"D - Oblíquo + explosão secundária", L"D - Oblique + secondary explosion")};
+		ini_set(L"instalador", L"queda", qs[q]);
+		if (q == 0) log(T(L"Queda de aeronave (teste): desligada.", L"Aircraft crash (test): off."));
+		else
+		{
+			log(std::wstring(T(L"Queda de aeronave (teste): ", L"Aircraft crash (test): ")) + qn[q]);
+			fs::path nz = dcs_path() / L"bin" / L"NightzimBoom" / (std::wstring(L"queda_") + qs[q] + L".nzv");
+			if (!fs::exists(nz, ec)) log(std::wstring(T(L"AVISO: falta o arquivo ", L"WARNING: missing file ")) + nz.wstring());
+			else log(T(L"  No jogo: derrube/bata uma aeronave no chão, ou mire o terreno e aperte Ctrl+Shift+Q.", L"  In game: crash an aircraft into the ground, or aim at the terrain and press Ctrl+Shift+Q."));
+		}
+	}
 	// substituir (ou nao) as explosoes do jogo
 	bool rep = chk(g_kStock);
 	bool was = ini_get(L"instalador", L"substituir", L"1") != L"0";
@@ -541,7 +555,7 @@ static void refresh_status()
 
 // ---------------------------------------------------------------- janela (interface propria, desenhada com GDI+)
 enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_TAB4, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH, ID_COMPAT };
-static const wchar_t *APP_VER = L"1.3.0"; static const UINT WM_UPD = WM_APP + 1;
+static const wchar_t *APP_VER = L"1.3.1"; static const UINT WM_UPD = WM_APP + 1;
 static int g_upd = 0; static std::wstring g_latest; static int g_bUpd = -1;	// g_upd: 0 verificando, 1 em dia, 2 ha versao nova, -1 sem resposta
 static bool g_pix = false; static Gdiplus::Bitmap *g_qr = nullptr, *g_icDisc = nullptr, *g_icInsta = nullptr, *g_icPix = nullptr;	// icones fornecidos pelo autor
 static const wchar_t *PIX_KEY = L"f5124246-e867-42ce-a16b-d139017560a5";
@@ -721,7 +735,8 @@ static void build_ui()
 	g_kShock = add(W_TOG, 1, 0, X0, y, W / 2 - 8, 30, T(L"Onda de choque", L"Shockwave"));
 	g_kWilson = add(W_TOG, 1, 0, X0 + W / 2 + 8, y, W / 2 - 8, 30, T(L"Nuvem de Wilson", L"Wilson cloud")); y += 34;
 	g_kWind = add(W_TOG, 1, 0, X0, y, W / 2 - 8, 30, T(L"Fumaça deriva com o vento", L"Smoke drifts with the wind"));
-	g_kStock = add(W_TOG, 1, 0, X0 + W / 2 + 8, y, W / 2 - 8, 30, T(L"Substituir explosões do jogo", L"Replace stock explosions")); y += 70;
+	g_kStock = add(W_TOG, 1, 0, X0 + W / 2 + 8, y, W / 2 - 8, 30, T(L"Substituir explosões do jogo", L"Replace stock explosions")); y += 40;
+	g_cQueda = add(W_SEG, 1, 0, X0, y, W, 34, T(L"Queda de aeronave (teste)", L"Aircraft crash (test)"), {T(L"Não", L"Off"), L"A", L"B", L"C", L"D"}); y += 30;	// v1.3.1 teste: 4 variantes da queda no solo para escolher
 	g_cVar = add(W_SEG, 9, ID_VRAM, X0, y, W, 34, L"", {L"", L"", L""});	// (antigo seletor global; fora de uso)
 	g_kBC = add(W_SEG, 3, ID_VRAM, X0, 316, W, 34, T(L"Compressão", L"Compression"), {T(L"Desligada", L"Off"), T(L"Metade", L"Half"), T(L"Um quarto (BC7)", L"One quarter (BC7)")});
 	g_kLazy = add(W_TOG, 3, ID_VRAM, X0, 354, W, 30, T(L"Carregar variações extras só quando usadas", L"Load extra variations only when used"));
