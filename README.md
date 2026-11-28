@@ -2,7 +2,7 @@
 
 ## Nightzim BoomMod X - volumetric explosions for DCS World
 
-**Latest: BoomMod X v1.3.0** - OptiScaler/upscaler compatibility, VR fixes, nuclear dust without stripes. Download: https://github.com/fcirera/Nightzim-BoomMod/releases/latest
+**Latest: BoomMod X v1.3.2** - night camera fix, VR fix (explosions no longer vanish in the headset), aircraft crash effect (test). Download: https://github.com/fcirera/Nightzim-BoomMod/releases/latest
 
 *Português abaixo.*
 
@@ -132,6 +132,6 @@ Questions and suggestions are welcome. Discord ID: `999680611314831390`
 
 ## Status
 
-Classic line: version 3.2c. BoomMod X: v1.3.0. This repository contains the mod files and the installers. The simulation engine and the `.ffx` exporter are not published here.
+Classic line: version 3.2c. BoomMod X: v1.3.2. This repository contains the mod files and the installers. The simulation engine and the `.ffx` exporter are not published here.
 
 Not affiliated with Eagle Dynamics. DCS World is a trademark of its owner.
