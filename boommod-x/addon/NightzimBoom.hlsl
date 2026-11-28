@@ -673,6 +673,8 @@ cbuffer PL : register(b5)
 	float4 plO;		// xyz: posicao da camera no mundo (modulo 4096, para o ruido ficar preso no mundo)
 	float4 plR;		// xyz: ponta do missil (relativa a camera), w: chama (0..1)
 	float4 plF;		// xyz: direcao para tras, w: comprimento da chama (m)
+	float4 plG[4];	// brilho de reentrada: xyz ponta da ogiva (relativa a camera), w: intensidade (0 = sem)
+	float4 plH[4];	// xyz: direcao para tras, w: comprimento da esteira de plasma (m)
 	float4 plP[640];
 };
 #define PL_K 8
@@ -851,6 +853,44 @@ float4 ps_plume(VSOut i) : SV_Target
 		float behind = saturate(tqu / 3.0 + 0.15);
 		glow += float3(1.0, 0.8, 0.5) * (0.25 * exp(-dc / 8.0) * (0.5 + 0.5 * (1.0 - day * 0.5)) * behind + 0.9 * exp(-(ang / 0.0025) * (ang / 0.0025)) * near) * saturate((tmax - sc) / 5.0 + 0.5);
 		glow *= plR.w * max(T, 0.3);
+	}
+	// reentrada (Fattah): ogiva incandescente. Cabeca branca pequena, coroa laranja larga (vista de muito longe) e esteira
+	// curta de plasma que esfria de amarelo para vermelho. Tamanho minimo em pixels: de longe vira um ponto forte, nao some.
+	[loop] for (int g = 0; g < 4; g++)
+	{
+		float I = plG[g].w;
+		if (I <= 0.0) continue;
+		float3 A = plG[g].xyz, e = plH[g].xyz; float Ln = plH[g].w;
+		float sH = dot(d, A);
+		float b = dot(d, e), dW = dot(d, -A), eW = dot(e, -A);
+		float den = max(1.0 - b * b, 1e-5);
+		float tq = clamp((eW - b * dW) / den, 0.0, Ln);
+		float sc = max(dot(d, A + e * tq), 0.0);
+		if (sH <= 0.0 && sc <= 0.0) continue;
+		float dc = length(d * sc - (A + e * tq));
+		float f = tq / Ln;
+		float pm = max(sc, 1.0) * 2.0 * camR.w * screen.w;	// metros por pixel naquela distancia
+		float vis = saturate((tmax - sc) / (5.0 + 0.002 * sc) + 0.5);
+		float fl_t = plA.z;
+		float flick = 0.92 + 0.08 * sin(fl_t * 47.0 + g * 2.1) * sin(fl_t * 19.0 + 0.7);
+		// esteira
+		float rw = 1.1 + 6.0 * f, rwe = max(rw, 1.3 * pm);
+		float tail = exp(-(dc * dc) / (rwe * rwe)) * pow(1.0 - f, 1.8) * max(sqrt(rw / rwe), 0.75) * (1.0 - 0.5 * day);
+		if (tail > 0.002 && pm < 1.5) tail *= 0.55 + 0.9 * Noise.SampleLevel(LinWrap, (plO.xyz + d * sc) * 0.06 - e * fl_t * 9.0, 0);
+		float3 tc = lerp(float3(1.0, 0.66, 0.26), float3(1.0, 0.22, 0.03), saturate(f * 2.2));
+		// cabeca e coroa
+		float sHp = max(sH, 1.0);
+		float dh = length(d * sHp - A);
+		float pmh = sHp * 2.0 * camR.w * screen.w;
+		float rh = 1.5, rhe = max(rh, 1.8 * pmh);
+		float head = exp(-(dh * dh) / (rhe * rhe)) * max(saturate(sqrt(rh / rhe) * 2.0), 0.9) * 4.0;
+		float ang = dh / sHp;
+		float pa = 2.0 * camR.w * screen.w;	// angulo de um pixel
+		float halo = 0.55 * exp(-ang / max(0.0035, 2.5 * pa)) + 0.12 * exp(-ang / max(0.018, 10.0 * pa)) + 0.5 * exp(-dh / 14.0);
+		halo *= 1.0 - 0.6 * day;
+		float visH = sH > 0.0 ? saturate((tmax - sH) / (5.0 + 0.002 * sH) + 0.5) : 0.0;
+		float3 gr = (float3(1.0, 0.95, 0.85) * head + float3(1.0, 0.50, 0.16) * halo) * visH + tc * tail * 2.6 * vis;
+		glow += gr * I * flick * max(T, 0.3);
 	}
 	// mesma saida da fumaca das explosoes: luz linear -> exposicao -> curva de tom -> gama, e nevoa atmosferica pela distancia
 	float gl = saturate(max(glow.r, max(glow.g, glow.b)) * 0.9);

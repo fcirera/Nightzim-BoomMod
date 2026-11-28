@@ -279,8 +279,25 @@ static void check_reshade(const fs::path &dcs)
 		log(T(L"[X] Este é o ReShade COMUM (sem suporte completo a add-ons): o mod não vai aparecer no jogo. Baixe em reshade.me o SEGUNDO botão, \"ReShade 6.x with full add-on support\", e instale por cima (bin\\DCS.exe, só DirectX 10/11/12).",
 			  L"[X] This is the STANDARD ReShade (no full add-on support): the mod will not show up in game. On reshade.me use the SECOND download button, \"ReShade 6.x with full add-on support\", and install it over this one (bin\\DCS.exe, DirectX 10/11/12 only)."));
 	else log(T(L"[OK] É a versão \"with full add-on support\".", L"[OK] It is the \"with full add-on support\" build."));
+	{	// ReShade tambem instalado como camada OpenXR (XR_APILAYER_reshade) e ativa: no VR ele entra duas vezes e o mod nao desenha direito
+		for (HKEY root : {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER})
+		{
+			HKEY k;
+			if (RegOpenKeyExW(root, L"SOFTWARE\\Khronos\\OpenXR\\1\\ApiLayers\\Implicit", 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) continue;
+			for (DWORD i = 0;; i++)
+			{
+				wchar_t nome[1024]; DWORD nn = 1024, tipo = 0, val = 1, vs = sizeof val;
+				if (RegEnumValueW(k, i, nome, &nn, nullptr, &tipo, (BYTE *)&val, &vs) != ERROR_SUCCESS) break;
+				std::wstring n = nome; for (auto &c : n) c = (wchar_t)towlower(c);
+				if (n.find(L"reshade") != std::wstring::npos && tipo == REG_DWORD && val == 0)
+					log(T(L"[X] O ReShade também está instalado como camada OpenXR (XR_APILAYER_reshade) e ela está ATIVA. No VR isso atrapalha o mod. Desative ou remova essa camada (ou rode o instalador do ReShade de novo com \"OpenXR\" desmarcado) e deixe só o dxgi.dll.",
+						  L"[X] ReShade is also installed as an OpenXR layer (XR_APILAYER_reshade) and it is ENABLED. In VR this breaks the mod. Disable or remove that layer (or run the ReShade setup again with \"OpenXR\" unticked) and keep only dxgi.dll."));
+			}
+			RegCloseKey(k);
+		}
+	}
 	// o ReShade carregou o add-on na ultima vez que o DCS abriu?
-	bool tem = fs::exists(bin / L"NightzimBoom.addon64", ec);
+	bool tem = fs::exists(dcs / L"bin" / L"NightzimBoom.addon64", ec) || fs::exists(bin / L"NightzimBoom.addon64", ec);	// o add-on fica sempre em bin, mesmo quando o ReShade checado e o de bin-mt (AddonPath)
 	if (!tem) { log(T(L"[!] O add-on do mod ainda não está em bin: clique em INSTALAR / ATIVAR.", L"[!] The mod add-on is not in bin yet: click INSTALL / ACTIVATE.")); return; }
 	std::ifstream lg(bin / L"ReShade.log"); std::string line; bool tentou = false, registrou = false; int n = 0;
 	while (lg && std::getline(lg, line) && n++ < 3000)
@@ -555,7 +572,7 @@ static void refresh_status()
 
 // ---------------------------------------------------------------- janela (interface propria, desenhada com GDI+)
 enum { ID_UPD = 99, ID_PATH = 100, ID_BROWSE, ID_ON, ID_OFF, ID_DEL, ID_LOGDIR, ID_APPLY, ID_VRAM, ID_TAB0, ID_TAB1, ID_TAB2, ID_TAB3, ID_TAB4, ID_LANG, ID_PAY, ID_PIX, ID_DISC, ID_INSTA, ID_GH, ID_COMPAT };
-static const wchar_t *APP_VER = L"1.3.1"; static const UINT WM_UPD = WM_APP + 1;
+static const wchar_t *APP_VER = L"1.3.2"; static const UINT WM_UPD = WM_APP + 1;
 static int g_upd = 0; static std::wstring g_latest; static int g_bUpd = -1;	// g_upd: 0 verificando, 1 em dia, 2 ha versao nova, -1 sem resposta
 static bool g_pix = false; static Gdiplus::Bitmap *g_qr = nullptr, *g_icDisc = nullptr, *g_icInsta = nullptr, *g_icPix = nullptr;	// icones fornecidos pelo autor
 static const wchar_t *PIX_KEY = L"f5124246-e867-42ce-a16b-d139017560a5";

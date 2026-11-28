@@ -23,6 +23,8 @@ static std::unordered_map<ID3D11Resource *, void *> g_mapped;
 static std::unordered_map<ID3D11Resource *, uint32_t> g_cb_size;	// 0 = nao e constant buffer
 // resultado mais recente
 static float g_cap_tanv = 0, g_cap_near = 0; static uint64_t g_cap_proj_frame = 0, g_cap_view_frame = 0;
+static int g_dbg_nview = 0, g_dbg_nview_last = 0; static float g_dbg_first[3] = {0, 0, 0}, g_dbg_mindot = 1.f, g_dbg_mindot_last = 1.f;	// depuracao: quantas vistas aceitas por quadro e a maior diferenca entre elas
+static uint64_t g_best_view_frame = 0; static float g_best_view_sc = 0;	// melhor vista do quadro (a mais parecida com a camera do Lua)
 static float g_cap_ax[3][3];							// frente, cima, direita (mundo DCS)
 static uint64_t g_frame_mt = 0;
 static uint64_t g_view_wr = 0, g_proj_wr = 0;	// ultimo quadro em que o DCS escreveu nos pontos conhecidos
@@ -257,9 +259,15 @@ static void on_cb_data(ID3D11Resource *r, const void *data, uint64_t offset, uin
 				memcpy(g_any.ax, ax, sizeof ax); g_any.v = true;
 				if (LV.kind == 2) { float v4[4][3]; vecs(m, LV.layout, v4); g_any.tanv = tv; g_any.asp = len3(v4[1]) / len3(v4[0]); g_any.p = true; }
 			}
-			if (test_view(m, LV.layout, LV.kind, LV.perm, LV.sgn, ax, tv, 0.6f))
+			// O jogo grava varias cameras por quadro neste buffer (de noite sao ~28: luzes, sombras...). So vale a que bate com a
+			// camera do Lua (cada eixo a menos de ~1,2 grau), e entre as que batem, a mais parecida. Antes a tolerancia era de 53
+			// graus e valia a ultima gravada: de noite o efeito saia do lugar (medido: mediana de 12 graus de erro).
+			float vsc = 0;
+			if (test_view(m, LV.layout, LV.kind, LV.perm, LV.sgn, ax, tv, 0.99978f, &vsc) && (g_best_view_frame != g_frame_mt || vsc > g_best_view_sc))
 			{
+				g_best_view_frame = g_frame_mt; g_best_view_sc = vsc;
 				memcpy(g_cap_ax, ax, sizeof ax); g_cap_view_frame = g_frame_mt;
+				if (g_dbg_nview++ == 0) memcpy(g_dbg_first, ax[0], 12); else g_dbg_mindot = std::min(g_dbg_mindot, ax[0][0] * g_dbg_first[0] + ax[0][1] * g_dbg_first[1] + ax[0][2] * g_dbg_first[2]);
 				if (LV.kind == 2 && g_loc_proj.kind < 0) { g_cap_tanv = tv; g_cap_proj_frame = g_frame_mt; }
 			}
 		}
@@ -302,6 +310,7 @@ static bool on_update_buf_cmd(command_list *, const void *data, resource dest, u
 // chamado no present: atualiza a referencia e fecha o aprendizado
 static void matcap_frame(const Cam &cam, bool have_cam)
 {
+	g_dbg_nview_last = g_dbg_nview; g_dbg_mindot_last = g_dbg_mindot; g_dbg_nview = 0; g_dbg_mindot = 1.f;
 	std::lock_guard<std::mutex> lk(g_mx);
 	g_frame_mt++;
 	if (have_cam) for (int i = 0; i < 3; i++) { g_ref[0][i] = cam.x[i]; g_ref[1][i] = cam.y[i]; g_ref[2][i] = cam.z[i]; }

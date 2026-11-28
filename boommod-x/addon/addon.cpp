@@ -46,7 +46,7 @@ struct Config
 	float dist[6] = {600, 600, 200, 400, 400, 150};
 	float shock_gain = 1.f, wilson_gain = 1.f, volume = 0.f;
 	float shock_type[6] = {0.8f, 0.1f, 0.13f, 0.3f, 0.f, 0.1f};	// fracao da onda de choque de referencia (3 m de refracao)
-	int dev = 0; int jdam_v1 = 0; int jdam_nuke = 0; int moab_nuke = 1; float flash_gain = 1.f, flash_adapt_s = 6.f, ns_refr = 25.f, ns_dust = 0.f, ns_shake = 1.f, ns_shake_vr = 0.f; int plume = 1; float plume_gain = 1.f, plume_size = 1.f, plume_nozzle = 5.6f; int max_inst = 30;
+	int dev = 0; int jdam_v1 = 0; int jdam_nuke = 0; int moab_nuke = 1; float flash_gain = 1.f, flash_adapt_s = 6.f, ns_refr = 25.f, ns_dust = 0.f, ns_shake = 1.f, ns_shake_vr = 0.f; int plume = 1; float re_lead_s = -0.007f, re_tail = 1.f, re_gain = 1.f; int dbg_plume = 0, dbg_max = 600; float dbg_dt = 0.33f; float plume_gain = 1.f, plume_size = 1.f, plume_nozzle = 5.6f; int max_inst = 30;
 	int debris_on = 0; float realism = 1.f, firelight = 1.6f; float debris_density = 1.f, debris_glow = 1.f;
 	int wind_on = 1; float wind_gain = 1.f, wind_shear_m = 80.f, wind_delay_s = 0.6f;
 	float detail = 0.8f, detail_scale = 12.f, fire_gain = 0.6f, flame_min_t = 1450.f, edge_fade = 0.08f;
@@ -100,6 +100,8 @@ static void load_config()
 	{ char a[16], b[16]; GetPrivateProfileStringA("instalador", "moab", "nuke", a, sizeof a, (g_dir + "NightzimBoom.ini").c_str());	// chave antiga (v1.2.6 de teste)
 	  GetPrivateProfileStringA("instalador", "scud", a, b, sizeof b, (g_dir + "NightzimBoom.ini").c_str()); c.moab_nuke = !_stricmp(b, "nuke"); }	// missil SCUD (tipo 9 do hook): explosao nuclear (padrao) ou igual a JDAM
 	c.ns_refr = ini_f("nuke", "choque_refracao", c.ns_refr); c.ns_dust = ini_f("nuke", "choque_poeira", c.ns_dust); c.ns_shake = ini_f("nuke", "tranco", c.ns_shake); c.ns_shake_vr = ini_f("nuke", "tranco_vr", c.ns_shake_vr);
+	c.re_lead_s = ini_f("reentrada", "avanco_s", c.re_lead_s); c.re_tail = ini_f("reentrada", "esteira", c.re_tail); c.re_gain = ini_f("reentrada", "brilho", c.re_gain);	// brilho de reentrada do Fattah
+	c.dbg_plume = (int)ini_f("depuracao", "rastro", 0.f); c.dbg_max = (int)ini_f("depuracao", "max", 600.f); c.dbg_dt = ini_f("depuracao", "intervalo_s", 0.33f);
 	c.plume = (int)ini_f("rastro", "scud", (float)c.plume); c.plume_gain = ini_f("rastro", "densidade", c.plume_gain); c.plume_size = ini_f("rastro", "tamanho", c.plume_size); c.plume_nozzle = ini_f("rastro", "bocal_m", c.plume_nozzle);	// distancia do centro do missil ate o bocal	// rastro de fumaca proprio do SCUD
 	c.flash_gain = ini_f("nuke", "clarao", c.flash_gain); c.flash_adapt_s = std::max(0.5f, ini_f("nuke", "adaptacao_s", c.flash_adapt_s));
 	c.debris_on = (int)ini_f("debris", "enabled", (float)c.debris_on);
@@ -464,6 +466,7 @@ static ID3D11Resource *g_final_dsv[2] = {};	// passadas finais (uma por olho), e
 static bool g_final_done[2] = {};
 static int g_eye_order_n = 0, g_final_n = 0;
 static bool g_vr = false;
+static UINT g_eye_lock_w = 0, g_eye_lock_h = 0;	// tamanho dos olhos do headset, fixado na primeira vez que os dois aparecem (quase quadrados e iguais)
 static Eye *eye_of(ID3D11Resource *r) { if (!r) return nullptr; for (auto &e : g_eye) if (e.dsv == r) return &e; return nullptr; }
 static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *rtv, int idx);
 static bool g_dc2_frame = false;
@@ -655,11 +658,14 @@ static void depth_end_frame()
 		for (auto &kv : g_dstat)
 		{
 			const DStat &d = kv.second;
+			// olho ja conhecido continua valendo enquanto o jogo desenhar nele, mesmo sem a camera lida neste quadro (reaprendendo)
+			if (g_eye_lock_w) { Eye *e0 = eye_of(kv.first); if (e0 && d.has_rt && d.draws >= 150) e0->seen = fr; }
 			if (kv.first == g_sel || tex_matches_screen(kv.first) || !d.has_rt || d.draws < 150 || !d.cam3.ok) continue;
 			if (vlen3(d.cam3.B) < 0.35f) continue;	// campo de visao estreito: nao e olho (pod, espelhos pequenos...)
 			ID3D11Texture2D *t = nullptr; D3D11_TEXTURE2D_DESC td = {};
 			if (SUCCEEDED(kv.first->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&t))) { t->GetDesc(&td); t->Release(); }
 			if (td.Width < 800 || td.Height < 800) continue;
+			if (g_eye_lock_w && (td.Width != g_eye_lock_w || td.Height != g_eye_lock_h)) continue;	// headset ja identificado: so vale o tamanho dele (o espelho na janela do PC fica de fora)
 			cds.push_back({kv.first, d.draws, td.Width, td.Height});
 		}
 		{	// olho de oculos e quase quadrado (Quest 3: 2496x2688); se houver um assim, descarta alvos em formato de tela larga
@@ -672,13 +678,21 @@ static void depth_end_frame()
 		{
 			if (i == 1 && (cds[1].w != cds[0].w || cds[1].h != cds[0].h)) break;
 			Eye *e = eye_of(cds[i].r);
+			if (!e && g_eye_lock_w)
+			{	// o jogo recriou a profundidade do olho: troca na hora o olho que nao foi visto neste quadro (sem esperar expirar)
+				bool livre = false; for (auto &x : g_eye) if (!x.dsv) livre = true;
+				if (!livre) for (auto &x : g_eye) if (x.dsv && x.seen != fr) { x.scene.release(); x.cock.release(); x = Eye(); break; }
+			}
 			if (!e) for (auto &x : g_eye) if (!x.dsv) { e = &x; e->dsv = cds[i].r; e->w = cds[i].w; e->h = cds[i].h; if (cfg.vr_log) { const VP3 &q = g_dstat[cds[i].r].cam3; float fl = vlen3(q.A); float offx = (q.A[0] * q.B[0] + q.A[1] * q.B[1] + q.A[2] * q.B[2]) / std::max(1e-6f, vlen3(q.B)), offy = (q.A[0] * q.C[0] + q.A[1] * q.C[1] + q.A[2] * q.C[2]) / std::max(1e-6f, vlen3(q.C)); logf("VR: olho detectado - profundidade %p %ux%u, %u desenhos; meio-campo H %.1f V %.1f graus, descentro H %.3f V %.3f (tangente), plano proximo %.3f, |A| %.3f", (void *)cds[i].r, cds[i].w, cds[i].h, cds[i].draws, atanf(vlen3(q.B)) * 57.2958f, atanf(vlen3(q.C)) * 57.2958f, offx, offy, q.nearv, fl); }; break; }
 			if (e) e->seen = fr;
 		}
 		int ne = 0;
-		for (auto &e : g_eye) { if (e.dsv && fr - e.seen > 90) { e.scene.release(); e.cock.release(); e = Eye(); } if (e.dsv) ne++; }
-		bool was = g_vr; g_vr = cfg.vr_on && ne > 0 && !g_sel;	// (no monitor sempre ha uma profundidade do tamanho da tela)
-		if (g_vr != was && cfg.vr_log) logf(g_vr ? "VR: desenhando as explosoes em cada olho (%d olho(s))" : "VR: sem olhos detectados - volta ao modo monitor", ne);
+		for (auto &e : g_eye) { if (e.dsv && fr - e.seen > (g_eye_lock_w ? 600u : 90u)) { e.scene.release(); e.cock.release(); e = Eye(); } if (e.dsv) ne++; }
+		if (!g_eye_lock_w && g_eye[0].dsv && g_eye[1].dsv && g_eye[0].w == g_eye[1].w && g_eye[0].h == g_eye[1].h && g_eye[0].w < g_eye[0].h * 1.2f)
+		{ g_eye_lock_w = g_eye[0].w; g_eye_lock_h = g_eye[0].h; logf("VR: headset identificado, olhos de %ux%u; outros tamanhos passam a ser ignorados", g_eye_lock_w, g_eye_lock_h); }
+		// com o headset identificado, a profundidade do tamanho da tela (espelho) nao desliga mais o VR
+		bool was = g_vr; g_vr = cfg.vr_on && ne > 0 && (!g_sel || g_eye_lock_w);	// (no monitor sempre ha uma profundidade do tamanho da tela)
+		if (g_vr != was && cfg.vr_log) logf(g_vr ? "VR: desenhando as explosoes em cada olho (%d olho(s))" : "VR: sem olhos detectados - volta ao modo monitor (olhos %d, profundidade de tela %s)", ne, g_sel ? "escolhida" : "nao");
 		// passadas finais: alvo RGBA8 sem MSAA do tamanho do olho, com profundidade propria (nao a do olho)
 		g_final_dsv[0] = g_final_dsv[1] = nullptr;
 		if (g_vr)
@@ -819,7 +833,7 @@ static bool init_gfx(device *device)
 	D3D11_BUFFER_DESC bd = {}; bd.ByteWidth = 16 * 22; bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	G.dev->CreateBuffer(&bd, nullptr, &G.cb);
 	{ D3D11_BUFFER_DESC tb = bd; tb.ByteWidth = 16 * 34; G.dev->CreateBuffer(&tb, nullptr, &G.cb_tr); }
-	{ D3D11_BUFFER_DESC tb = bd; tb.ByteWidth = 48; G.dev->CreateBuffer(&tb, nullptr, &G.cb_fl); tb.ByteWidth = 96; G.dev->CreateBuffer(&tb, nullptr, &G.cb_ns); tb.ByteWidth = 16 * (7 + 2 * PL_MAXP); G.dev->CreateBuffer(&tb, nullptr, &G.cb_pl); }
+	{ D3D11_BUFFER_DESC tb = bd; tb.ByteWidth = 48; G.dev->CreateBuffer(&tb, nullptr, &G.cb_fl); tb.ByteWidth = 96; G.dev->CreateBuffer(&tb, nullptr, &G.cb_ns); tb.ByteWidth = 16 * (15 + 2 * PL_MAXP); G.dev->CreateBuffer(&tb, nullptr, &G.cb_pl); }
 	D3D11_SAMPLER_DESC sd = {}; sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP; sd.MaxLOD = D3D11_FLOAT32_MAX;
 	G.dev->CreateSamplerState(&sd, &G.samp);
 	D3D11_BLEND_DESC bl = {}; auto &rt = bl.RenderTarget[0];
@@ -897,7 +911,7 @@ static void on_destroy_device(device *dev)
 	if (G.dev && nd != G.dev) { logf("outro dispositivo destruido (%p; o do jogo e %p) - ignorado", (void *)nd, (void *)G.dev); return; }
 	logf("dispositivo do jogo destruido");
 	std::lock_guard<std::mutex> lk(g_mx);
-	for (auto &e : g_eye) { e.scene.release(); e.cock.release(); e = Eye(); } g_vr = false;
+	for (auto &e : g_eye) { e.scene.release(); e.cock.release(); e = Eye(); } g_vr = false; g_eye_lock_w = g_eye_lock_h = 0;
 	g_load_dev = nullptr; g_dc.release(); g_dc2.release(); g_dcp.release(); release_all_volumes(); G.release();
 }
 
@@ -1407,7 +1421,7 @@ static void draw_flash(const Flash &F, const double *fwd, const double *right, c
 // e levado pelo vento e vai clareando. O shader desenha um tubo de fumaca (soma analitica de gaussianas por trecho)
 // marrom-claro (o acido nitrico do combustivel), com a chama branco-amarelada na ponta.
 struct PlPt { double p[3]; double tb; float wx, wz, rnd; };
-struct PlTrack { int32_t id = 0; bool alive = false; double t_first = 0, t_last = 0, last_emit = -1, base_y = 0; double head[3] = {}, vel[3] = {0, 1, 0}; float wx = 0, wz = 0; std::vector<PlPt> pts; };
+struct PlTrack { int32_t id = 0; int kind = 0; double burn = 68.0; bool alive = false; double t_first = 0, t_last = 0, last_emit = -1, base_y = 0; double head[3] = {}, vel[3] = {0, 1, 0}; float wx = 0, wz = 0; std::vector<PlPt> pts; };
 static std::vector<PlTrack> g_pl;
 static const double PL_BURN = 68.0, PL_LIFE = 240.0;
 static void plume_clear() { g_pl.clear(); }
@@ -1421,7 +1435,7 @@ static void plume_update(double tnow)
 		if (!e.on) continue;
 		PlTrack *T = nullptr;
 		for (auto &x : g_pl) if (x.id == e.id && x.t_last > tnow - 30) { T = &x; break; }
-		if (!T) { g_pl.push_back(PlTrack()); T = &g_pl.back(); T->id = e.id; T->t_first = e.t; T->base_y = e.p[1]; logf("rastro de missil: acompanhando id %d", (int)e.id); }
+		if (!T) { g_pl.push_back(PlTrack()); T = &g_pl.back(); T->id = e.id; T->kind = e.id < 0 ? 1 : 0; T->burn = T->kind ? 49.0 : PL_BURN; T->t_first = e.t; T->base_y = e.p[1]; logf("rastro de missil: acompanhando id %d (%s)", (int)e.id, T->kind ? "Fattah" : "SCUD"); }
 		double dp2 = pow(e.p[0] - T->head[0], 2) + pow(e.p[1] - T->head[1], 2) + pow(e.p[2] - T->head[2], 2);
 		if (e.t > T->t_last + 1e-4 && T->t_last > 0 && dp2 > 1e-6)	// velocidade suavizada: a chama aponta sempre para tras do voo (nao "escapa")
 		{
@@ -1430,7 +1444,7 @@ static void plume_update(double tnow)
 		}
 		T->alive = true; if (dp2 > 1e-6 || T->t_last <= 0) { T->t_last = e.t; memcpy(T->head, e.p, 24); } T->wx = e.wx; T->wz = e.wz;
 		double mv = T->pts.empty() ? 1e9 : sqrt(pow(e.p[0] - T->pts.back().p[0], 2) + pow(e.p[1] - T->pts.back().p[1], 2) + pow(e.p[2] - T->pts.back().p[2], 2));
-		if (e.t - T->t_first < PL_BURN && (T->last_emit < 0 || (e.t - T->last_emit >= 0.4 && (mv >= 8.0 || e.t - T->last_emit >= 2.0))))	// no lancamento (lento) so quando andou 8 m
+		if (e.t - T->t_first < T->burn && (T->last_emit < 0 || (e.t - T->last_emit >= 0.4 && (mv >= 8.0 || e.t - T->last_emit >= 2.0))))	// no lancamento (lento) so quando andou 8 m
 		{
 			PlPt q; memcpy(q.p, e.p, 24); q.tb = e.t; q.wx = e.wx; q.wz = e.wz; q.rnd = 0.8f + 0.4f * (float)((T->pts.size() * 2654435761u) % 1000) / 1000.f;
 			T->pts.push_back(q); T->last_emit = e.t;
@@ -1439,7 +1453,16 @@ static void plume_update(double tnow)
 	g_pl.erase(std::remove_if(g_pl.begin(), g_pl.end(), [&](const PlTrack &T) { return !T.alive && tnow - T.t_last > PL_LIFE; }), g_pl.end());
 }
 // monta os pontos para o shader (relativos a camera, espaco do shader: x norte, y leste, z cima); devolve tambem a ponta e a direcao da chama
-struct PlFlame { float head[3] = {}, back[3] = {0, 0, -1}; float on = 0.f; };
+struct PlFlame { float head[3] = {}, back[3] = {0, 0, -1}; float on = 0.f, len = 45.f; float glow[4][8] = {}; int ng = 0; };
+static const int PL_HDR = 15;	// vetores de cabecalho do buffer do rastro (antes dos pontos): 7 do SCUD + 8 do brilho de reentrada
+// brilho de reentrada do Fattah: o ar comprimido na frente da ogiva vira plasma. Intensidade ~ densidade do ar^0,3 x velocidade^3, so na descida.
+static double reentry_I(const PlTrack &T, bool burning)
+{
+	if (T.kind != 1 || !T.alive || burning) return 0.0;
+	double sp = sqrt(T.vel[0] * T.vel[0] + T.vel[1] * T.vel[1] + T.vel[2] * T.vel[2]);
+	double rho = exp(-std::max(0.0, T.head[1]) / 7200.0);
+	return pow(rho, 0.3) * pow(sp / 2400.0, 3.0) * 1.6 * std::min(1.0, std::max(0.0, -T.vel[1] / 150.0)) * std::min(1.0, std::max(0.0, (sp - 900.0) / 600.0));
+}
 static int plume_build(const Cam &cam, float *out, PlFlame &F)
 {
 	struct Q { float x, y, z, r, dens, age; };
@@ -1448,7 +1471,9 @@ static int plume_build(const Cam &cam, float *out, PlFlame &F)
 	std::vector<Q> all, kept;
 	for (auto &T : g_pl)
 	{
-		bool burning = T.alive && T.t_last - T.t_first < PL_BURN;
+		bool burning = T.alive && T.t_last - T.t_first < T.burn;
+		// Fattah (id negativo): mesmo rastro do SCUD, com metade do diametro, bocal a 3,6 m do centro e 49 s de queima
+		const double nozzle = T.kind ? 3.6 : cfg.plume_nozzle, psize = cfg.plume_size * (T.kind ? 0.5 : 1.0);
 		all.clear();
 		int np = (int)T.pts.size() + (burning ? 1 : 0);
 		// direcao do voo (para tras): a fumaca so se forma ~10 m abaixo do bocal (o jato nao deixa antes); o bocal fica ~5,5 m atras do centro
@@ -1459,10 +1484,10 @@ static int plume_build(const Cam &cam, float *out, PlFlame &F)
 		for (int k = 0; k < np; k++)
 		{
 			bool head = k == (int)T.pts.size();
-			PlPt q; if (head) { for (int c = 0; c < 3; c++) q.p[c] = hd[c] + bk[c] * (cfg.plume_nozzle + 6.5); q.tb = T.t_last; q.wx = T.wx; q.wz = T.wz; } else q = T.pts[k];
+			PlPt q; if (head) { for (int c = 0; c < 3; c++) q.p[c] = hd[c] + bk[c] * (nozzle + 6.5); q.tb = T.t_last; q.wx = T.wx; q.wz = T.wz; } else q = T.pts[k];
 			double age = std::max(0.0, cam.t - q.tb);
 			double ground = exp(-std::max(0.0, q.p[1] - T.base_y) / 45.0);		// junto ao chao (lancamento) a nuvem se espalha mais
-			double r = 0.3 * (7.0 + 24.0 * sqrt(age) + 1.5 * age) * (1.0 + 0.8 * ground) * cfg.plume_size;	// 30% do primeiro tamanho (pedido do Felipe)
+			double r = 0.3 * (7.0 + 24.0 * sqrt(age) + 1.5 * age) * (1.0 + 0.8 * ground) * psize;	// 30% do primeiro tamanho (pedido do Felipe)
 			double fade = 1.0 - std::min(1.0, std::max(0.0, (age - 120.0) / (PL_LIFE - 120.0)));
 			double tau = 3.0 * pow(2.1 / r, 0.45) * (1.0 + 0.5 * ground);	// profundidade otica no meio do tubo
 			double drift = std::min(age, 180.0);
@@ -1472,11 +1497,22 @@ static int plume_build(const Cam &cam, float *out, PlFlame &F)
 			o.r = (float)r; o.dens = (float)(tau / (1.7725 * r) * fade); o.age = (float)age;
 			all.push_back(o);
 		}
+		{
+			double I = reentry_I(T, burning);
+			if (I > 0.01 && F.ng < 4)
+			{
+				double lg = std::max(-0.1, std::min(0.1, cam.t - T.t_last)) + cfg.re_lead_s;	// mesma conta da chama, com um recuo fixo ajustavel
+				float *g = F.glow[F.ng++];
+				g[0] = (float)(T.head[0] + T.vel[0] * lg - bk[0] * 3.5 - cam.p[0]); g[1] = (float)(T.head[2] + T.vel[2] * lg - bk[2] * 3.5 - cam.p[2]); g[2] = (float)(T.head[1] + T.vel[1] * lg - bk[1] * 3.5 - cam.p[1]);
+				g[3] = (float)(std::min(I, 1.5) * cfg.re_gain);
+				g[4] = (float)bk[0]; g[5] = (float)bk[2]; g[6] = (float)bk[1]; g[7] = (float)((80.0 + 420.0 * std::min(I, 1.0)) * cfg.re_tail);	// esteira de plasma (m)
+			}
+		}
 		if (all.size() < 2) continue;
 		if (burning && F.on == 0.f)
 		{
 			// chama comeca no bocal (5,5 m atras do centro do missil); espaco do shader: x norte, y leste, z cima
-			double nz = cfg.plume_nozzle; F.head[0] = (float)(hd[0] + bk[0] * nz - cam.p[0]); F.head[1] = (float)(hd[2] + bk[2] * nz - cam.p[2]); F.head[2] = (float)(hd[1] + bk[1] * nz - cam.p[1]);
+			double nz = nozzle; F.len = T.kind ? 30.f : 45.f; F.head[0] = (float)(hd[0] + bk[0] * nz - cam.p[0]); F.head[1] = (float)(hd[2] + bk[2] * nz - cam.p[2]); F.head[2] = (float)(hd[1] + bk[1] * nz - cam.p[1]);
 			F.back[0] = (float)bk[0]; F.back[1] = (float)bk[2]; F.back[2] = (float)bk[1];
 			F.on = 1.f;
 		}
@@ -1505,12 +1541,13 @@ static void draw_plume(CB &cb, const Cam &cam, const double *fwd, const double *
 	ID3D11RenderTargetView *rtv, ID3D11ShaderResourceView *depth, bool ms, const D3D11_VIEWPORT &vp, const double *sd)
 {
 	if (g_pl.empty() || !G.ps_plume[ms ? 1 : 0] || !G.cb_pl) return;
-	static std::vector<float> buf(4 * (7 + 2 * PL_MAXP));
+	static std::vector<float> buf(4 * (PL_HDR + 2 * PL_MAXP));
 	PlFlame F;
-	int n = plume_build(cam, buf.data() + 28, F);
+	int n = plume_build(cam, buf.data() + 4 * PL_HDR, F);
 	{ static DWORD tl[2] = {0, 0}; int m = g_vr ? 1 : 0;
 	  if (GetTickCount() - tl[m] > 10000) { tl[m] = GetTickCount(); logf("rastro de missil: desenhado (%s) %d pontos, chama %d, alvo %.0fx%.0f, profundidade %s", m ? "VR" : "monitor", n, (int)F.on, vp.Width, vp.Height, depth ? "sim" : "nao"); } }
-	if (n < 2) return;
+	if (n < 2 && F.ng == 0) return;
+	if (n < 2) n = 0;
 	auto G3 = [](const double *v, float *o) { o[0] = (float)v[0]; o[1] = (float)v[2]; o[2] = (float)v[1]; };
 	G3(fwd, cb.camF); G3(right, cb.camR); G3(up, cb.camU);
 	cb.camF[3] = tanx; cb.camR[3] = tany;
@@ -1523,7 +1560,8 @@ static void draw_plume(CB &cb, const Cam &cam, const double *fwd, const double *
 	h[11] = h[15] = 0.f;
 	h[16] = (float)fmod(cam.p[0], 4096.0); h[17] = (float)fmod(cam.p[2], 4096.0); h[18] = (float)fmod(cam.p[1], 4096.0); h[19] = 0.f;
 	h[20] = F.head[0]; h[21] = F.head[1]; h[22] = F.head[2]; h[23] = F.on;
-	h[24] = F.back[0]; h[25] = F.back[1]; h[26] = F.back[2]; h[27] = 45.f;	// chama de 45 m
+	h[24] = F.back[0]; h[25] = F.back[1]; h[26] = F.back[2]; h[27] = F.len;	// chama de 45 m (SCUD) ou 30 m (Fattah)
+	for (int k = 0; k < 4; k++) { memcpy(h + 28 + 4 * k, F.glow[k], 16); memcpy(h + 44 + 4 * k, F.glow[k] + 4, 16); if (k >= F.ng) h[28 + 4 * k + 3] = 0.f; }	// brilho de reentrada
 	G.ctx->UpdateSubresource(G.cb_pl, 0, nullptr, buf.data(), 0, 0);	// buffer constante: sempre inteiro (caixa parcial e ignorada pelo D3D11)
 	G.ctx->PSSetConstantBuffers(0, 1, &G.cb);
 	G.ctx->PSSetConstantBuffers(5, 1, &G.cb_pl);
@@ -1537,6 +1575,117 @@ static void draw_plume(CB &cb, const Cam &cam, const double *fwd, const double *
 	G.ctx->Draw(3, 0);
 	ID3D11ShaderResourceView *nul[8] = {}; G.ctx->PSSetShaderResources(0, 8, nul);
 	ID3D11RenderTargetView *nrt = nullptr; G.ctx->OMSetRenderTargets(1, &nrt, nullptr);
+}
+
+// ---------------------------------------------------------------- depuracao do rastro de missil
+// Grava recortes da imagem final (ja com os efeitos) em volta de onde o add-on ACHA que o missil esta, com uma cruz
+// verde nesse ponto e uma cruz magenta no bocal, mais uma linha por recorte num CSV. Comparando a cruz com o missil
+// desenhado pelo jogo da para medir o deslocamento sem ninguem precisar descrever. Liga no ini: [depuracao] rastro=1.
+static void dbg_capture(swapchain *sc, const Cam &cam, const double *r, const double *u, float tanx, float tany, bool cap_proj, bool cap_view, const Cam &camL)
+{
+	if (!cfg.dbg_plume || g_pl.empty()) return;
+	static double tlast = 0; static int nfr = 0; static FILE *csv = nullptr; static ID3D11Texture2D *st = nullptr; static DXGI_FORMAT stf = DXGI_FORMAT_UNKNOWN; static bool warned = false;
+	const int CW = 512, CH = 288;
+	double tn = GetTickCount64() / 1000.0;
+	if (tn - tlast < cfg.dbg_dt || nfr >= cfg.dbg_max) return;
+	ID3D11Texture2D *bb = back_buffer(sc); if (!bb) return;
+	D3D11_TEXTURE2D_DESC bd; bb->GetDesc(&bd);
+	bool rgba = bd.Format == DXGI_FORMAT_R8G8B8A8_UNORM || bd.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || bd.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS;
+	bool bgra = bd.Format == DXGI_FORMAT_B8G8R8A8_UNORM || bd.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || bd.Format == DXGI_FORMAT_B8G8R8A8_TYPELESS;
+	bool r10 = bd.Format == DXGI_FORMAT_R10G10B10A2_UNORM || bd.Format == DXGI_FORMAT_R10G10B10A2_TYPELESS;
+	if (bd.SampleDesc.Count != 1 || !(rgba || bgra || r10) || (int)bd.Width < CW || (int)bd.Height < CH)
+	{ if (!warned) { warned = true; logf("depuracao: imagem final nao serve (formato %d, %d amostras, %ux%u)", (int)bd.Format, (int)bd.SampleDesc.Count, bd.Width, bd.Height); } return; }
+	tlast = tn;
+	std::string dir = g_dir + "dbg\\"; CreateDirectoryA(dir.c_str(), nullptr);
+	if (!csv)
+	{
+		csv = fopen((dir + "rastro.csv").c_str(), "w"); if (!csv) return;
+		fprintf(csv, "n,id,tipo,relogio_s,t_camera,t_missil,atraso_s,vel_ms,alt_m,dist_camera_m,queimando,brilho,x_missil,y_missil,x_bocal,y_bocal,recorte_x0,recorte_y0,projecao_dcs,orientacao_dcs,fov_graus,largura,altura,x_lua,y_lua,ang_frente_lua_dcs,ang_cima_lua_dcs,vistas_no_quadro,espalhamento_vistas_graus,cam_x,cam_y,cam_z,mis_x,mis_y,mis_z\n");
+		logf("depuracao do rastro ligada: recortes em %s", dir.c_str());
+	}
+	if (!st || stf != bd.Format)
+	{
+		if (st) { st->Release(); st = nullptr; }
+		D3D11_TEXTURE2D_DESC sd = bd; sd.Width = CW; sd.Height = CH; sd.MipLevels = 1; sd.ArraySize = 1; sd.BindFlags = 0; sd.MiscFlags = 0; sd.Usage = D3D11_USAGE_STAGING; sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		if (FAILED(G.dev->CreateTexture2D(&sd, nullptr, &st))) { st = nullptr; return; }
+		stf = bd.Format;
+	}
+	int W = (int)bd.Width, H = (int)bd.Height, done = 0;
+	for (auto &T : g_pl)
+	{
+		if (!T.alive || done >= 2 || nfr >= cfg.dbg_max) continue;
+		// mesma conta do plume_build
+		bool burning = T.t_last - T.t_first < T.burn;
+		double bk[3] = {0, -1, 0}; double vl = sqrt(T.vel[0] * T.vel[0] + T.vel[1] * T.vel[1] + T.vel[2] * T.vel[2]);
+		if (vl > 0.5) for (int c = 0; c < 3; c++) bk[c] = -T.vel[c] / vl;
+		double lag = burning ? std::max(-0.1, std::min(0.1, cam.t - T.t_last)) : 0.0;
+		const double nozzle = T.kind ? 3.6 : cfg.plume_nozzle;
+		double hd[3], nzp[3]; for (int c = 0; c < 3; c++) { hd[c] = T.head[c] + T.vel[c] * lag; nzp[c] = hd[c] + bk[c] * nozzle; }
+		auto proj = [&](const double *P, double &px, double &py) {
+			double v[3] = {P[0] - cam.p[0], P[1] - cam.p[1], P[2] - cam.p[2]};
+			double z = v[0] * cam.x[0] + v[1] * cam.x[1] + v[2] * cam.x[2];
+			if (z < 1.0) return false;
+			double x = (v[0] * r[0] + v[1] * r[1] + v[2] * r[2]) / (z * tanx), y = (v[0] * u[0] + v[1] * u[1] + v[2] * u[2]) / (z * tany);
+			px = (x * 0.5 + 0.5) * W; py = (0.5 - y * 0.5) * H; return true; };
+		double mx = -1, my = -1, nx = -1, ny = -1, gx = -1, gy = -1, lx = -1, ly = -1;
+		bool vis = proj(hd, mx, my); proj(nzp, nx, ny);
+		{	// o mesmo ponto com a orientacao do Lua (cruz ciano)
+			float srr = cfg.flip_right ? -1.f : 1.f; double v[3] = {hd[0] - camL.p[0], hd[1] - camL.p[1], hd[2] - camL.p[2]};
+			double z = v[0] * camL.x[0] + v[1] * camL.x[1] + v[2] * camL.x[2];
+			if (z > 1.0) { lx = ((v[0] * camL.z[0] + v[1] * camL.z[1] + v[2] * camL.z[2]) * srr / (z * tanx) * 0.5 + 0.5) * W; ly = (0.5 - (v[0] * camL.y[0] + v[1] * camL.y[1] + v[2] * camL.y[2]) / (z * tany) * 0.5) * H; }
+		}
+		double angLD = acos(std::max(-1.0, std::min(1.0, cam.x[0] * camL.x[0] + cam.x[1] * camL.x[1] + cam.x[2] * camL.x[2]))) * 57.29578;
+		double angUD = acos(std::max(-1.0, std::min(1.0, cam.y[0] * camL.y[0] + cam.y[1] * camL.y[1] + cam.y[2] * camL.y[2]))) * 57.29578;
+		double Ire = reentry_I(T, burning);
+		if (Ire > 0.01) { double lg = std::max(-0.1, std::min(0.1, cam.t - T.t_last)) + cfg.re_lead_s; double gp[3]; for (int c = 0; c < 3; c++) gp[c] = T.head[c] + T.vel[c] * lg - bk[c] * 3.5; proj(gp, gx, gy); }
+		double dist = sqrt(pow(hd[0] - cam.p[0], 2) + pow(hd[1] - cam.p[1], 2) + pow(hd[2] - cam.p[2], 2));
+		int x0 = -1, y0 = -1;
+		if (vis && mx > -CW / 4 && mx < W + CW / 4 && my > -CH / 4 && my < H + CH / 4)
+		{
+			x0 = std::max(0, std::min(W - CW, (int)mx - CW / 2)); y0 = std::max(0, std::min(H - CH, (int)my - CH / 2));
+			D3D11_BOX box = {(UINT)x0, (UINT)y0, 0, (UINT)(x0 + CW), (UINT)(y0 + CH), 1};
+			G.ctx->CopySubresourceRegion(st, 0, 0, 0, 0, bb, 0, &box);
+			D3D11_MAPPED_SUBRESOURCE m;
+			if (SUCCEEDED(G.ctx->Map(st, 0, D3D11_MAP_READ, 0, &m)))
+			{
+				std::vector<unsigned char> px((size_t)CW * CH * 3);
+				for (int y = 0; y < CH; y++)
+				{
+					const unsigned char *src = (const unsigned char *)m.pData + (size_t)y * m.RowPitch; unsigned char *dst = &px[(size_t)(CH - 1 - y) * CW * 3];
+					for (int x = 0; x < CW; x++)
+					{
+						unsigned char R, Gc, B;
+						if (r10) { uint32_t v; memcpy(&v, src + 4 * x, 4); R = (unsigned char)((v & 1023) >> 2); Gc = (unsigned char)(((v >> 10) & 1023) >> 2); B = (unsigned char)(((v >> 20) & 1023) >> 2); }
+						else if (bgra) { B = src[4 * x]; Gc = src[4 * x + 1]; R = src[4 * x + 2]; }
+						else { R = src[4 * x]; Gc = src[4 * x + 1]; B = src[4 * x + 2]; }
+						dst[3 * x] = B; dst[3 * x + 1] = Gc; dst[3 * x + 2] = R;
+					}
+				}
+				G.ctx->Unmap(st, 0);
+				auto cross = [&](double cx, double cy, unsigned char cr, unsigned char cg, unsigned char cbv) {
+					int ix = (int)cx - x0, iy = (int)cy - y0;
+					for (int k = 7; k <= 22; k++) for (int sgn = -1; sgn <= 1; sgn += 2) for (int ax = 0; ax < 2; ax++)
+					{
+						int qx = ix + (ax == 0 ? sgn * k : 0), qy = iy + (ax == 1 ? sgn * k : 0);
+						if (qx < 0 || qx >= CW || qy < 0 || qy >= CH) continue;
+						unsigned char *d = &px[((size_t)(CH - 1 - qy) * CW + qx) * 3]; d[0] = cbv; d[1] = cg; d[2] = cr;
+					} };
+				cross(lx + 1, ly + 1, 0, 255, 255); cross(mx, my, 0, 255, 0); if (Ire > 0.01) cross(gx, gy, 0, 200, 255); else cross(nx, ny, 255, 0, 255);
+				char nm[64]; sprintf(nm, "f_%04d_%s.bmp", nfr, T.kind ? "fattah" : "scud");
+				FILE *f = fopen((dir + nm).c_str(), "wb");
+				if (f)
+				{
+					unsigned char h[54] = {'B', 'M'}; uint32_t sz = 54 + (uint32_t)px.size(), off = 54, hs = 40, w = CW, hh = CH; uint16_t pl = 1, bpp = 24;
+					memcpy(h + 2, &sz, 4); memcpy(h + 10, &off, 4); memcpy(h + 14, &hs, 4); memcpy(h + 18, &w, 4); memcpy(h + 22, &hh, 4); memcpy(h + 26, &pl, 2); memcpy(h + 28, &bpp, 2);
+					fwrite(h, 1, 54, f); fwrite(px.data(), 1, px.size(), f); fclose(f);
+				}
+			}
+		}
+		fprintf(csv, "%d,%d,%s,%.3f,%.4f,%.4f,%.4f,%.1f,%.0f,%.1f,%d,%.3f,%.1f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%.2f,%d,%d,%.1f,%.1f,%.3f,%.3f,%d,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", nfr, (int)T.id, T.kind ? "fattah" : "scud", tn, cam.t, T.t_last, lag, vl, T.head[1], dist,
+			burning ? 1 : 0, Ire, mx, my, nx, ny, x0, y0, cap_proj ? 1 : 0, cap_view ? 1 : 0, atanf(tany) * 114.5916f, W, H, lx, ly, angLD, angUD, g_dbg_nview_last, acos(std::max(-1.f, std::min(1.f, g_dbg_mindot_last))) * 57.29578f, cam.p[0], cam.p[1], cam.p[2], T.head[0], T.head[1], T.head[2]);
+		fflush(csv);
+		nfr++; done++;
+	}
 }
 
 static void on_present(command_queue *, swapchain *sc, const rect *, const rect *, uint32_t, const rect *)
@@ -1563,8 +1712,9 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 	float nearm = g_near > 0 ? g_near : cfg.near_m;
 	// matrizes do proprio DCS (exatas e do mesmo quadro): tem prioridade sobre a calibracao
 	bool cap_proj = g_cap_proj_frame && g_frame_mt - g_cap_proj_frame <= 8;
-	bool cap_view = g_cap_view_frame && g_frame_mt - g_cap_view_frame <= 8;
+	bool cap_view = g_cap_view_frame && g_frame_mt - g_cap_view_frame <= 2;	// orientacao do DCS so se foi lida neste quadro (ou no anterior); senao vale a do Lua
 	if (cap_proj) { tanv = g_cap_tanv; if (g_cap_near > 0) nearm = g_cap_near; }
+	Cam camL = cam;	// depuracao: a camera como veio do Lua, antes de trocar a orientacao pela do DCS
 	if (cap_view && have_cam)
 		for (int i = 0; i < 3; i++) { cam.x[i] = g_cap_ax[0][i]; cam.y[i] = g_cap_ax[1][i]; cam.z[i] = g_cap_ax[2][i]; }
 	{
@@ -1790,6 +1940,7 @@ static void on_present(command_queue *, swapchain *sc, const rect *, const rect 
 		cb.screen[0] = (float)g_bb_w; cb.screen[1] = (float)g_bb_h; cb.screen[2] = 1.f / g_bb_w; cb.screen[3] = 1.f / g_bb_h;
 		cb.camU[3] = nearm;
 		draw_plume(cb, cam, cam.x, r, u, tanv * aspect, tanv, rtv, g_dc.valid ? g_dc.srv : nullptr, g_dc.samples > 1, vpp, sd);
+		dbg_capture(sc, cam, r, u, tanv * aspect, tanv, cap_proj, cap_view, camL);
 	}
 	{
 		NShock N = nuke_shock(cam, false);
@@ -1986,26 +2137,37 @@ static void pos_filter(Cam &cam)
 	}
 }
 // ---------------------------------------------------------------- VR: desenha as explosoes na imagem final de um olho
+static int g_vrd[8] = {};	// depuracao do VR: 0 chamadas, 1 sem explosao ativa, 2 sem camera do Lua, 3 alvo invalido, 4 sem camera do olho, 5 nada a desenhar, 6 desenhou
+static void vrd_report()
+{
+	if (!cfg.dbg_plume) return;
+	static DWORD tl = 0; DWORD now = GetTickCount();
+	if (now - tl < 10000) return;
+	tl = now;
+	if (g_vrd[0]) logf("VR depuracao (10 s): %d chamadas | sem explosao ativa %d | sem camera do Lua %d | alvo invalido %d | sem camera do olho %d | nada a desenhar %d | DESENHOU %d", g_vrd[0], g_vrd[1], g_vrd[2], g_vrd[3], g_vrd[4], g_vrd[5], g_vrd[6]);
+	memset(g_vrd, 0, sizeof g_vrd);
+}
 static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *rtv, int idx)
 {
-	if (!g_sh || !G.ok || !G.ps[0] || !g_have_spawn || !rtv) return;
+	g_vrd[0]++; vrd_report();
+	if (!g_sh || !G.ok || !G.ps[0] || !g_have_spawn || !rtv) { g_vrd[1]++; return; }
 	Cam cam;
-	if (!read_cam(cam)) return;
+	if (!read_cam(cam)) { g_vrd[2]++; return; }
 	pos_filter(cam);
 	ID3D11Resource *rr = nullptr; rtv->GetResource(&rr);
 	if (!rr) return;
 	ID3D11Texture2D *rt = nullptr; D3D11_TEXTURE2D_DESC rd = {};
 	if (SUCCEEDED(rr->QueryInterface(__uuidof(ID3D11Texture2D), (void **)&rt))) { rt->GetDesc(&rd); rt->Release(); }
 	rr->Release();
-	if (!rd.Width || rd.SampleDesc.Count != 1) return;
+	if (!rd.Width || rd.SampleDesc.Count != 1) { g_vrd[3]++; return; }
 	// camera deste olho: se a cena nao foi copiada numa limpeza (vista sem cabine), usa a profundidade e a camera atuais
 	VP3 vp = e.cam; bool mask = false;
 	{
 		std::lock_guard<std::mutex> lk(g_mx);
 		auto it = g_dstat.find(e.dsv);
-		if (!e.have_scene) { if (it == g_dstat.end() || !it->second.cam3.ok) return; vp = it->second.cam3; }
+		if (!e.have_scene) { if (it == g_dstat.end() || !it->second.cam3.ok) { g_vrd[4]++; return; } vp = it->second.cam3; }
 	}
-	if (!vp.ok) return;
+	if (!vp.ok) { g_vrd[4]++; return; }
 	struct PJ { int k; double t; float fade; double d2; };
 	std::vector<PJ> jobs;
 	for (int k = 0; k < MAXI; k++)
@@ -2027,7 +2189,8 @@ static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *
 		if (I.type == 11) { for (int q = 0; q < qn; q++) if (qf[q] > 0.004f) jobs.push_back({k, qt[q], qf[q], dx * dx + dy * dy + dz * dz + q}); continue; }
 		jobs.push_back({k, t, fade, dx * dx + dy * dy + dz * dz + (I.type == 10 ? 1e14 : 0.0)});	// poeira da nuke sempre por baixo (desenhada antes do cogumelo)
 	}
-	if (jobs.empty() && g_pl.empty()) return;	// rastro de missil sozinho no ar tambem e desenhado no VR
+	if (jobs.empty() && g_pl.empty()) { g_vrd[5]++; return; }	// rastro de missil sozinho no ar tambem e desenhado no VR
+	g_vrd[6]++;
 	std::sort(jobs.begin(), jobs.end(), [](const PJ &a, const PJ &b) { return a.d2 > b.d2; });
 
 	ID3DDeviceContextState *prev = nullptr;
@@ -2130,6 +2293,92 @@ static void vr_inject(ID3D11DeviceContext *ctx, Eye &e, ID3D11RenderTargetView *
 		if (N.on) { cb.camU[3] = nearm; draw_nshock(N, cb, cam, cam.x, cam.z, cam.y, 1.f, 1.f, rtv, g_nscene[idx & 1], e.scene.valid ? e.scene.srv : nullptr, ms, vp0, sd); }
 	}
 	{ Flash F = nuke_flash(cam); if (F.on) draw_flash(F, cam.x, cam.z, cam.y, rtv, vp0); }
+	if (cfg.dbg_plume)
+	{	// depuracao do VR: recorte do olho em volta de onde o add-on acha que esta a explosao mais proxima (cruz verde) ou o missil (magenta)
+		static double tl2[2] = {0, 0}; static int nfr = 0; static FILE *csv = nullptr; static ID3D11Texture2D *st = nullptr; static DXGI_FORMAT stf = DXGI_FORMAT_UNKNOWN;
+		const int CW = 512, CH = 288; double tn = GetTickCount64() / 1000.0; int ei = idx & 1;
+		if (tn - tl2[ei] >= cfg.dbg_dt && nfr < cfg.dbg_max && (int)rd.Width >= CW && (int)rd.Height >= CH)
+		{
+			tl2[ei] = tn;
+			std::string dir = g_dir + "dbg\\"; CreateDirectoryA(dir.c_str(), nullptr);
+			if (!csv) { csv = fopen((dir + "vr.csv").c_str(), "w"); if (csv) fprintf(csv, "n,olho,relogio_s,t_camera,largura,altura,formato,tem_cena,explosoes,rastros,tipo,idade_s,dist_m,x,y,recorte_x0,recorte_y0,ang_frente_olho_lua,ang_cima_olho_lua,cam_x,cam_y,cam_z\n"); }
+			double P[3] = {0, 0, 0}; int typ = -1; double age = 0; bool have = false;
+			if (!jobs.empty()) { const PJ &J = jobs.back(); Inst &I = g_inst[J.k]; P[0] = I.p[0]; P[1] = I.p[1] + 4.0; P[2] = I.p[2]; typ = I.type; age = J.t; have = true; }
+			else for (auto &T : g_pl) if (T.alive) { memcpy(P, T.head, 24); typ = T.kind ? 101 : 100; have = true; break; }
+			double px = -1, py = -1, dist = 0;
+			if (have)
+			{	// v = s * (A + x B + y C): resolve por Cramer
+				double v[3] = {P[0] - cam.p[0], P[1] - cam.p[1], P[2] - cam.p[2]}; dist = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+				auto det = [](const double *a, const double *b, const double *c) { return a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]); };
+				double a[3] = {vp.A[0], vp.A[1], vp.A[2]}, b[3] = {vp.B[0], vp.B[1], vp.B[2]}, c[3] = {vp.C[0], vp.C[1], vp.C[2]};
+				double D = det(a, b, c);
+				if (fabs(D) > 1e-12) { double sv = det(v, b, c) / D, sx = det(a, v, c) / D, sy = det(a, b, v) / D; if (sv > 0.5) { px = (sx / sv * 0.5 + 0.5) * rd.Width; py = (0.5 - sy / sv * 0.5) * rd.Height; } }
+			}
+			Cam cl; double angF = -1, angU = -1;
+			if (read_cam(cl)) { double la = vlen3(vp.A), lc = vlen3(vp.C);
+				if (la > 1e-9 && lc > 1e-9) { angF = acos(std::max(-1.0, std::min(1.0, (vp.A[0] * cl.x[0] + vp.A[1] * cl.x[1] + vp.A[2] * cl.x[2]) / la))) * 57.29578; angU = acos(std::max(-1.0, std::min(1.0, (vp.C[0] * cl.y[0] + vp.C[1] * cl.y[1] + vp.C[2] * cl.y[2]) / lc))) * 57.29578; } }
+			int x0 = (int)rd.Width / 2 - CW / 2, y0 = (int)rd.Height / 2 - CH / 2;
+			if (px >= 0 && px < rd.Width && py >= 0 && py < rd.Height) { x0 = std::max(0, std::min((int)rd.Width - CW, (int)px - CW / 2)); y0 = std::max(0, std::min((int)rd.Height - CH, (int)py - CH / 2)); }
+			bool rgba = rd.Format == DXGI_FORMAT_R8G8B8A8_UNORM || rd.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || rd.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS;
+			bool bgra = rd.Format == DXGI_FORMAT_B8G8R8A8_UNORM || rd.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || rd.Format == DXGI_FORMAT_B8G8R8A8_TYPELESS;
+			bool r10 = rd.Format == DXGI_FORMAT_R10G10B10A2_UNORM || rd.Format == DXGI_FORMAT_R10G10B10A2_TYPELESS;
+			ID3D11Resource *r2 = nullptr; rtv->GetResource(&r2);
+			if (r2 && ei == 0 && (rgba || bgra || r10))
+			{
+				if (!st || stf != rd.Format)
+				{
+					if (st) { st->Release(); st = nullptr; }
+					D3D11_TEXTURE2D_DESC sd2 = rd; sd2.Width = CW; sd2.Height = CH; sd2.MipLevels = 1; sd2.ArraySize = 1; sd2.BindFlags = 0; sd2.MiscFlags = 0; sd2.Usage = D3D11_USAGE_STAGING; sd2.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+					if (FAILED(G.dev->CreateTexture2D(&sd2, nullptr, &st))) st = nullptr;
+					stf = rd.Format;
+				}
+				if (st)
+				{
+					D3D11_BOX box = {(UINT)x0, (UINT)y0, 0, (UINT)(x0 + CW), (UINT)(y0 + CH), 1};
+					G.ctx->CopySubresourceRegion(st, 0, 0, 0, 0, r2, 0, &box);
+					D3D11_MAPPED_SUBRESOURCE m;
+					if (SUCCEEDED(G.ctx->Map(st, 0, D3D11_MAP_READ, 0, &m)))
+					{
+						std::vector<unsigned char> pxb((size_t)CW * CH * 3);
+						for (int y = 0; y < CH; y++)
+						{
+							const unsigned char *src = (const unsigned char *)m.pData + (size_t)y * m.RowPitch; unsigned char *dst = &pxb[(size_t)(CH - 1 - y) * CW * 3];
+							for (int x = 0; x < CW; x++)
+							{
+								unsigned char R, Gc, B2;
+								if (r10) { uint32_t vv; memcpy(&vv, src + 4 * x, 4); R = (unsigned char)((vv & 1023) >> 2); Gc = (unsigned char)(((vv >> 10) & 1023) >> 2); B2 = (unsigned char)(((vv >> 20) & 1023) >> 2); }
+								else if (bgra) { B2 = src[4 * x]; Gc = src[4 * x + 1]; R = src[4 * x + 2]; }
+								else { R = src[4 * x]; Gc = src[4 * x + 1]; B2 = src[4 * x + 2]; }
+								dst[3 * x] = B2; dst[3 * x + 1] = Gc; dst[3 * x + 2] = R;
+							}
+						}
+						G.ctx->Unmap(st, 0);
+						if (px >= 0)
+						{
+							int ix = (int)px - x0, iy = (int)py - y0; bool trk = typ >= 100;
+							for (int k = 9; k <= 26; k++) for (int sgn = -1; sgn <= 1; sgn += 2) for (int ax = 0; ax < 2; ax++)
+							{
+								int qx = ix + (ax == 0 ? sgn * k : 0), qy = iy + (ax == 1 ? sgn * k : 0);
+								if (qx < 0 || qx >= CW || qy < 0 || qy >= CH) continue;
+								unsigned char *d = &pxb[((size_t)(CH - 1 - qy) * CW + qx) * 3]; d[0] = trk ? 255 : 0; d[1] = trk ? 0 : 255; d[2] = trk ? 255 : 0;
+							}
+						}
+						char nm[64]; sprintf(nm, "vr_%04d.bmp", nfr);
+						FILE *f = fopen((dir + nm).c_str(), "wb");
+						if (f)
+						{
+							unsigned char h[54] = {'B', 'M'}; uint32_t sz = 54 + (uint32_t)pxb.size(), off = 54, hs = 40, w = CW, hh = CH; uint16_t pl = 1, bpp = 24;
+							memcpy(h + 2, &sz, 4); memcpy(h + 10, &off, 4); memcpy(h + 14, &hs, 4); memcpy(h + 18, &w, 4); memcpy(h + 22, &hh, 4); memcpy(h + 26, &pl, 2); memcpy(h + 28, &bpp, 2);
+							fwrite(h, 1, 54, f); fwrite(pxb.data(), 1, pxb.size(), f); fclose(f);
+						}
+					}
+				}
+			}
+			if (r2) r2->Release();
+			if (csv) { fprintf(csv, "%d,%d,%.3f,%.4f,%u,%u,%d,%d,%d,%d,%d,%.2f,%.1f,%.1f,%.1f,%d,%d,%.3f,%.3f,%.2f,%.2f,%.2f\n", nfr, ei, tn, cam.t, rd.Width, rd.Height, (int)rd.Format, e.have_scene ? 1 : 0, (int)jobs.size(), (int)g_pl.size(), typ, age, dist, px, py, x0, y0, angF, angU, cam.p[0], cam.p[1], cam.p[2]); fflush(csv); }
+			if (ei == 0) nfr++;
+		}
+	}
 	ID3D11RenderTargetView *nrt = nullptr; G.ctx->OMSetRenderTargets(1, &nrt, nullptr);
 	G.ctx1->SwapDeviceContextState(prev, nullptr);
 	if (prev) prev->Release();

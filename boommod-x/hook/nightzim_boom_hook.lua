@@ -156,6 +156,7 @@ end
 -- tipo da explosao pelo nome da arma (modo multiplayer, sem a massa do explosivo)
 local function classify_name(n)
 	n = string.upper(n or "")
+	if string.find(n, "FATTAH", 1, true) then return 0 end		-- mod Nightzim Fattah: explosao da JDAM no impacto
 	for _, k in ipairs({"SCUD", "R-17", "R_17", "8K14"}) do		-- missil SCUD: explosao nuclear (ou JDAM, conforme o instalador); a MOAB fica para depois
 		if string.find(n, k, 1, true) then return 9 end end
 	for _, k in ipairs({"NAPALM", "MK_77", "MK-77", "MK77", "BLU_27", "BLU-27", "BLU_1B", "BLU-1B", "BLU_1/B", "BLU-1/B", "ZB_500", "ZB-500", "INCEND", "FIREBOMB", "FIRE_BOMB", "FIRE BOMB"}) do
@@ -336,17 +337,22 @@ local function ballistic_step(t)
 				L(string.format("acompanhando %s (id %s) a %.0f m de altura", tostring(o.Name), tostring(id), o.Position.y))
 				e = cb.bal[id]
 				e.trail = nz.track and classify_name(o.Name) == 9	-- SCUD: rastro de fumaca proprio
+				e.tid = tonumber(id) or 0
+				if nz.track and string.find(string.upper(o.Name or ""), "FATTAH", 1, true) then	-- mod Nightzim Fattah: mesmo rastro, mais fino
+					e.trail = true; e.tid = -math.abs(e.tid)										-- id negativo = Fattah (o add-on separa por isso)
+				end
+				if e.trail then sun_update(o.Position.x, o.Position.z, t) end	-- sem isto o rastro usava o sol do ini (dia) ate a primeira explosao
 			end
 			if e.trail then
 				if not e.wt or t - e.wt > 2 then e.wt = t; e.wx, e.wz = wind_at(o.Position.x, o.Position.y, o.Position.z) end
-				nz.track(tonumber(id) or 0, o.Position.x, o.Position.y, o.Position.z, t, e.wx or 0, e.wz or 0)
+				nz.track(e.tid, o.Position.x, o.Position.y, o.Position.z, t, e.wx or 0, e.wz or 0)
 			end
 		end
 	end
 	for id, e in pairs(cb.bal) do
 		if not seen[id] then
 			cb.bal[id] = nil
-			if e.trail then nz.track_end(tonumber(id) or 0) end
+			if e.trail then nz.track_end(e.tid or tonumber(id) or 0) end
 			local v = e.v or {x = 0, y = 0, z = 0}
 			local gap = t - e.t						-- tempo entre a ultima posicao vista e o sumico
 			local ty = classify_name(e.name)
